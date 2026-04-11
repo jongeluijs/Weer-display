@@ -38,6 +38,14 @@ export function renderRainRadarFragment({
   const chartH = chartBottom - chartTop;
   const xStep = width / (n - 1 || 1);
 
+  // Intensiteitskleur per mmh waarde
+  function intensityColor(mmh) {
+    if (mmh >= 5) return '#7733cc';    // paars: zware regen
+    if (mmh >= 2) return '#3355cc';    // donkerblauw
+    if (mmh >= 0.5) return '#4a7aff';  // mediumblauw
+    return '#7aa8ff';                   // lichtblauw
+  }
+
   // area pad: van links-onder via lijn via rechts-onder weer dicht
   const pts = values.map((v, i) => {
     const px = x + i * xStep;
@@ -53,6 +61,15 @@ export function renderRainRadarFragment({
     linePath +
     ` L ${(x + width).toFixed(1)} ${chartBottom.toFixed(1)}` +
     ` L ${x.toFixed(1)} ${chartBottom.toFixed(1)} Z`;
+
+  // Multi-stop gradient op basis van intensiteit
+  const gradId = `rainIntensity-${Math.random().toString(36).slice(2, 6)}`;
+  const gradStops = pts.map((p, i) => {
+    const pct = ((i / (pts.length - 1)) * 100).toFixed(1);
+    const col = intensityColor(p.v);
+    return `<stop offset="${pct}%" stop-color="${col}"/>`;
+  }).join('');
+  const intensityGradient = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">${gradStops}</linearGradient>`;
 
   // intensiteits-categorie label op basis van max
   let intensityLabel = 'lichte regen';
@@ -110,9 +127,10 @@ export function renderRainRadarFragment({
       : '';
 
   return `
+    <defs>${intensityGradient}</defs>
     ${baseline}
-    <path d="${areaPath}" fill="${accent}" fill-opacity="0.35" stroke="none"/>
-    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${areaPath}" fill="url(#${gradId})" fill-opacity="0.35" stroke="none"/>
+    <path d="${linePath}" fill="none" stroke="url(#${gradId})" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.9"/>
     ${title}
     ${totalMmLabel}
     ${timeLabels}

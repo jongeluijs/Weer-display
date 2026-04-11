@@ -1,30 +1,31 @@
-import { sunProgress, uvFromGr } from '../util/sun.js';
+import { sunProgress } from '../util/sun.js';
 import { esc } from '../util/dom.js';
 import { renderRainRadarFragment, hasRainForecast } from './rainRadar.js';
+import { moonPhase, renderMoonPhase, moonPhaseName } from './moonPhase.js';
 
 // Afgeplatte halve-ellips zonboog met huidige zonpositie, zonkracht +
-// UV-index vast aan de zon, en optioneel een compacte buienradar
-// area-chart geïntegreerd binnen het half-ellips interieur.
+// UV-index vast aan de zon, gouden-uur markering, maanfase 's nachts,
+// en optioneel een compacte buienradar area-chart geïntegreerd binnen
+// het half-ellips interieur.
 export function renderSunArc(liveweer, rainEntries = [], now = new Date()) {
   const { rise, set, t, isDay } = sunProgress(liveweer?.sup, liveweer?.sunder, now);
 
   const showRain = hasRainForecast(rainEntries);
   const w = 260;
-  const baselineY = 100; // waar rise/set lijn ligt
+  const baselineY = 100;
   const riseSetLabelY = baselineY + 12;
-  const h = riseSetLabelY + 6; // 118, iets hoger dan de volledig platte versie
+  const h = riseSetLabelY + 6;
 
   const cx = w / 2;
   const cy = baselineY;
-  const rx = 108; // horizontaal ongewijzigd
-  const ry = 75;  // iets hoger dan afgeplatte 60, nog steeds lager dan cirkel 108
+  const rx = 108;
+  const ry = 75;
 
   const start = { x: cx - rx, y: cy };
   const end = { x: cx + rx, y: cy };
   const arcPath = `M ${start.x} ${start.y} A ${rx} ${ry} 0 0 1 ${end.x} ${end.y}`;
 
-  // Zonpositie op halve ellips via parametrische formule.
-  // t=0 → linkerpunt (sunrise), t=1 → rechterpunt (sunset), t=0.5 → top.
+  // Zonpositie op halve ellips
   const angle = Math.PI * t;
   const progPoint = {
     x: cx - rx * Math.cos(angle),
@@ -41,31 +42,62 @@ export function renderSunArc(liveweer, rainEntries = [], now = new Date()) {
   const riseLabel = liveweer?.sup ? esc(liveweer.sup) : '—';
   const setLabel = liveweer?.sunder ? esc(liveweer.sunder) : '—';
 
-  // Zonkracht (gr in W/m²) en UV-index, afgeleid uit gr (UVI ≈ gr/100).
+  // Gouden-uur berekening (~30 min rond zonsopkomst/ondergang)
+  let goldenHourSvg = '';
+  let goldenHourActive = false;
+  if (rise && set) {
+    const riseMs = rise.getTime();
+    const setMs = set.getTime();
+    const nowMs = now.getTime();
+    const dayLen = setMs - riseMs;
+
+    if (dayLen > 0) {
+      // Gouden uur ochtend: rise tot rise+30min
+      const goldenMorningEnd = Math.min(30 * 60 * 1000 / dayLen, 0.1);
+      // Gouden uur avond: set-30min tot set
+      const goldenEveningStart = Math.max(1 - 30 * 60 * 1000 / dayLen, 0.9);
+
+      // Ochtend gouden-uur boog
+      const gmEndAngle = Math.PI * goldenMorningEnd;
+      const gmEnd = {
+        x: cx - rx * Math.cos(gmEndAngle),
+        y: cy - ry * Math.sin(gmEndAngle),
+      };
+      goldenHourSvg += `<path d="M ${start.x} ${start.y} A ${rx} ${ry} 0 0 1 ${gmEnd.x.toFixed(1)} ${gmEnd.y.toFixed(1)}"
+        fill="none" stroke="rgba(255, 200, 80, 0.35)" stroke-width="6" stroke-linecap="round"/>`;
+
+      // Avond gouden-uur boog
+      const geStartAngle = Math.PI * goldenEveningStart;
+      const geStart = {
+        x: cx - rx * Math.cos(geStartAngle),
+        y: cy - ry * Math.sin(geStartAngle),
+      };
+      goldenHourSvg += `<path d="M ${geStart.x.toFixed(1)} ${geStart.y.toFixed(1)} A ${rx} ${ry} 0 0 1 ${end.x} ${end.y}"
+        fill="none" stroke="rgba(255, 200, 80, 0.35)" stroke-width="6" stroke-linecap="round"/>`;
+
+      // Check of we nu in het gouden uur zitten
+      if (isDay && (t < goldenMorningEnd || t > goldenEveningStart)) {
+        goldenHourActive = true;
+      }
+    }
+  }
+
+  // Zonkracht label
   const grNum = Number(liveweer?.gr);
   const hasGr = Number.isFinite(grNum) && grNum > 0;
   const grText = hasGr ? `${Math.round(grNum)} W/m²` : '';
-  const uv = hasGr ? uvFromGr(grNum) : null;
-  const uvText = uv != null ? `UV ${uv}` : '';
 
-  // Labels schuiven mee met de zon en staan recht boven het icoon
-  // (buitenkant van de ellips). Kleiner font zodat het netjes past.
   const labelX = pos.x;
-  const grLabelY = pos.y - 22;
-  const uvLabelY = pos.y - 14;
+  const grLabelY = pos.y - 18;
 
   const grLabelSvg = hasGr
     ? `
       <text x="${labelX.toFixed(1)}" y="${grLabelY.toFixed(1)}" fill="#ffb454"
             font-size="6" font-family="sans-serif" font-weight="500"
-            text-anchor="middle">${esc(grText)}</text>
-      <text x="${labelX.toFixed(1)}" y="${uvLabelY.toFixed(1)}" fill="#ffb454"
-            font-size="6" font-family="sans-serif" font-weight="400"
-            opacity="0.85" text-anchor="middle">${esc(uvText)}</text>`
+            text-anchor="middle">${esc(grText)}</text>`
     : '';
 
-  // Zon- of maanicoon — clickable (data-action) voor zonnekracht-grafiek.
-  // Onzichtbare hit-circle maakt de tap-target ook op touch voldoende groot.
+  // Zon- of maanicoon
   const sunBody = isDay
     ? `<circle r="11" fill="${sunColor}" opacity="0.22"/>
        <circle r="6" fill="${sunColor}"/>
@@ -88,9 +120,42 @@ export function renderSunArc(liveweer, rainEntries = [], now = new Date()) {
       ${sunBody}
     </g>`;
 
-  // Ruimere regengrafiek binnen de half-ellips. rect(55,45,150,50) —
-  // de bovenhoeken rake(n) bijna de arc-rand (ellips cx=130, cy=100,
-  // rx=108, ry=75); de onderkant stopt ruim boven de baseline (y=95).
+  // Maanfase 's nachts
+  let moonSvg = '';
+  if (!isDay) {
+    const phase = moonPhase(now);
+    const phaseName = moonPhaseName(phase);
+    // Toon maan rechtsonder in de SVG
+    const moonX = end.x - 15;
+    const moonY = cy - 20;
+    // Render inline (kleine versie)
+    const moonSize = 18;
+    const mr = moonSize * 0.4;
+    const mcx = moonX;
+    const mcy = moonY;
+    const terminator = Math.cos(phase * 2 * Math.PI) * mr;
+
+    if (phase >= 0.49 && phase <= 0.51) {
+      // Volle maan
+      moonSvg = `<circle cx="${mcx}" cy="${mcy}" r="${mr}" fill="#e8e4d4" opacity="0.85"/>`;
+    } else if (phase > 0.01 && phase < 0.99) {
+      const isWaxing = phase < 0.5;
+      const sweepOuter = isWaxing ? 1 : 0;
+      const rxT = Math.abs(terminator);
+      const sweepInner = rxT < mr ? (isWaxing ? 0 : 1) : (isWaxing ? 1 : 0);
+      const top = { x: mcx, y: mcy - mr };
+      const bot = { x: mcx, y: mcy + mr };
+      const moonPath = `M ${top.x} ${top.y} A ${mr} ${mr} 0 0 ${sweepOuter} ${bot.x} ${bot.y} A ${rxT.toFixed(2)} ${mr} 0 0 ${sweepInner} ${top.x} ${top.y} Z`;
+      moonSvg = `
+        <circle cx="${mcx}" cy="${mcy}" r="${mr}" fill="rgba(255,255,255,0.06)"/>
+        <path d="${moonPath}" fill="#e8e4d4" opacity="0.75"/>`;
+    } else {
+      moonSvg = `<circle cx="${mcx}" cy="${mcy}" r="${mr}" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.5"/>`;
+    }
+    moonSvg += `<text x="${mcx}" y="${mcy + mr + 7}" fill="#8a93a6" font-size="5" text-anchor="middle" font-family="sans-serif">${esc(phaseName)}</text>`;
+  }
+
+  // Regengrafiek binnen de half-ellips
   const rainFragment = showRain
     ? renderRainRadarFragment({
         entries: rainEntries,
@@ -108,6 +173,11 @@ export function renderSunArc(liveweer, rainEntries = [], now = new Date()) {
       })
     : '';
 
+  // Gouden-uur label
+  const goldenLabel = goldenHourActive
+    ? `<div class="golden-hour-label">gouden uur</div>`
+    : '';
+
   return `
   <div class="sun-arc ${showRain ? 'with-rain' : ''}">
     <svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
@@ -118,14 +188,17 @@ export function renderSunArc(liveweer, rainEntries = [], now = new Date()) {
           <stop offset="100%" stop-color="#ffb454" stop-opacity="0.15"/>
         </linearGradient>
       </defs>
+      ${goldenHourSvg}
       <path d="${arcPath}" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="2" stroke-dasharray="2 4"/>
       ${progressPath ? `<path d="${progressPath}" fill="none" stroke="url(#arcGrad)" stroke-width="3" stroke-linecap="round"/>` : ''}
       ${rainFragment}
       <line x1="${(start.x - 4).toFixed(1)}" y1="${cy}" x2="${(end.x + 4).toFixed(1)}" y2="${cy}" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+      ${moonSvg}
       ${sunIcon}
       ${grLabelSvg}
       <text x="${(start.x + 2).toFixed(1)}" y="${riseSetLabelY}" fill="#8a93a6" font-size="10" text-anchor="start" font-family="sans-serif">↑ ${riseLabel}</text>
       <text x="${(end.x - 2).toFixed(1)}" y="${riseSetLabelY}" fill="#8a93a6" font-size="10" text-anchor="end" font-family="sans-serif">${setLabel} ↓</text>
     </svg>
+    ${goldenLabel}
   </div>`;
 }

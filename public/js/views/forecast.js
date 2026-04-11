@@ -44,8 +44,12 @@ function dayCard(d) {
   const windArrow = renderWindArrowCompact(d.windrgr, 22);
   const bft = Number.isFinite(Number(d.windbft)) ? `${d.windbft}` : '';
   const dir = d.windr || '';
+  // Temperatuurtint: warm (>22°), koud (<8°), neutraal
+  const maxT = Number(d.max_temp);
+  const tempClass = Number.isFinite(maxT) ? (maxT >= 22 ? 'warm' : maxT <= 8 ? 'cold' : 'neutral') : 'neutral';
+
   return `
-  <div class="forecast-day">
+  <div class="forecast-day" data-temp-class="${tempClass}">
     <div class="day-head">
       <span class="day-name">${esc(dayLabel)}</span>
       <span class="day-date">${esc(dateLabel)}</span>

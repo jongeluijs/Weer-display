@@ -5,31 +5,68 @@ import { renderToday } from './views/today.js';
 import { renderForecast } from './views/forecast.js';
 import { renderHistory } from './views/history.js';
 import { renderLineChart } from './components/lineChart.js';
-import { uvFromGr } from './util/sun.js';
+import { sunProgress } from './util/sun.js';
+import { applySkyColors, weatherParticleClass } from './util/atmosphere.js';
+import { computePressureTrend, renderPressureTrend } from './components/pressureTrend.js';
 
 const POLL_MS = 10 * 60 * 1000; // 10 minuten
 const CLOCK_MS = 1000;
+const ATMOSPHERE_MS = 60 * 1000; // elke minuut luchtkleuren updaten
 
 let currentView = 'today';
 let latestData = null;
+let latestHourlyHistory = null;
+
+// View volgorde voor richtingsbewuste transities
+const VIEW_ORDER = ['history', 'today', 'forecast'];
+
+// Weerdeeltjes klassen
+const WEATHER_CLASSES = ['weather-rain', 'weather-snow', 'weather-night', 'weather-mist', 'weather-thunder'];
 
 function showView(name) {
+  const oldIndex = VIEW_ORDER.indexOf(currentView);
+  const newIndex = VIEW_ORDER.indexOf(name);
+  const direction = newIndex > oldIndex ? 'right' : newIndex < oldIndex ? 'left' : '';
+
   currentView = name;
   document.querySelectorAll('.tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.view === name);
   });
   document.querySelectorAll('.view').forEach((v) => {
-    v.classList.toggle('active', v.id === `view-${name}`);
+    const isTarget = v.id === `view-${name}`;
+    v.classList.remove('active', 'slide-in-left', 'slide-in-right');
+    if (isTarget) {
+      v.classList.add('active');
+      if (direction === 'left') v.classList.add('slide-in-left');
+      else if (direction === 'right') v.classList.add('slide-in-right');
+    }
   });
+
   // Weeralarm-knop alleen op Vandaag-view zichtbaar.
   const warnBtn = el('warning-btn');
   if (warnBtn) warnBtn.hidden = name !== 'today';
+
+  updateTabIndicator();
   renderCurrentView();
 }
 
 async function renderCurrentView() {
   if (currentView === 'today') {
-    setHTML('view-today', renderToday(latestData));
+    // Haal druktrend op
+    let pressureTrendHtml = '';
+    if (latestData?.liveweer) {
+      try {
+        if (!latestHourlyHistory) {
+          const res = await getHistory('hourly');
+          if (res && Array.isArray(res.entries)) latestHourlyHistory = res.entries;
+        }
+        const trend = computePressureTrend(latestData.liveweer.luchtd, latestHourlyHistory || []);
+        pressureTrendHtml = renderPressureTrend(trend);
+      } catch (e) {
+        // negeer — trend is optioneel
+      }
+    }
+    setHTML('view-today', renderToday(latestData, { pressureTrendHtml }));
   } else if (currentView === 'forecast') {
     setHTML('view-forecast', renderForecast(latestData));
   } else if (currentView === 'history') {
@@ -37,6 +74,21 @@ async function renderCurrentView() {
     const html = await renderHistory();
     setHTML('view-history', html);
   }
+}
+
+// Tab-indicator: schuivende balk onder actieve tab
+function updateTabIndicator() {
+  const tabs = document.querySelector('.tabs');
+  const activeTab = document.querySelector('.tab.active');
+  if (!tabs || !activeTab) return;
+
+  const tabsRect = tabs.getBoundingClientRect();
+  const btnRect = activeTab.getBoundingClientRect();
+  const left = btnRect.left - tabsRect.left;
+  const width = btnRect.width;
+
+  tabs.style.setProperty('--tab-left', `${left}px`);
+  tabs.style.setProperty('--tab-width', `${width}px`);
 }
 
 function updateAlertBanner(data) {
@@ -50,14 +102,12 @@ function updateAlertBanner(data) {
   const level = Number(l.alarm);
   const hasAlarm = Number.isFinite(level) && level > 0;
 
-  // Knop is altijd zichtbaar; klasse bepaalt de visuele state (gedempt vs. rood).
   btn.classList.toggle('has-alarm', hasAlarm);
   btn.setAttribute(
     'aria-label',
     hasAlarm ? 'Weerwaarschuwing actief' : 'Geen weerwaarschuwing'
   );
 
-  // Veilig: textContent voorkomt XSS via lkop/ltekst
   if (hasAlarm) {
     title.textContent = l.lkop || 'Waarschuwing';
     text.textContent = l.ltekst || '';
@@ -76,7 +126,6 @@ function updateMeta(data) {
   }
 
   const lastEl = el('last-update');
-  const dial = el('dial');
   const meta = document.querySelector('.meta');
   if (!lastEl) return;
 
@@ -87,6 +136,27 @@ function updateMeta(data) {
     lastEl.textContent = 'geen data';
     if (meta) meta.classList.add('stale');
   }
+}
+
+// Update dynamische luchtkleuren op basis van zonpositie
+function updateAtmosphere() {
+  if (!latestData?.liveweer) return;
+  const l = latestData.liveweer;
+  applySkyColors(l.sup, l.sunder);
+}
+
+// Stel weerdeeltjes-klasse in op de dial
+function updateWeatherParticles() {
+  const dial = el('dial');
+  if (!dial || !latestData?.liveweer) return;
+
+  const l = latestData.liveweer;
+  const { isDay } = sunProgress(l.sup, l.sunder);
+  const cls = weatherParticleClass(l.image, isDay);
+
+  // Verwijder alle weer-klassen, voeg juiste toe
+  WEATHER_CLASSES.forEach((c) => dial.classList.remove(c));
+  if (cls) dial.classList.add(cls);
 }
 
 function tickClock() {
@@ -128,6 +198,9 @@ function bindTabs() {
 
   bindModal('temp-chart-modal');
   bindModal('sun-chart-modal');
+
+  // Touch swipe ondersteuning
+  bindSwipe();
 }
 
 // Standaard modal-gedrag: close-knop + klik-buiten-kaart sluit.
@@ -147,6 +220,37 @@ function bindModal(id) {
   });
 }
 
+// Touch swipe voor view-wisseling
+function bindSwipe() {
+  const stage = document.querySelector('.stage');
+  if (!stage) return;
+
+  let startX = 0;
+  let startY = 0;
+
+  stage.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  stage.addEventListener('touchend', (e) => {
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const diffX = endX - startX;
+    const diffY = endY - startY;
+
+    // Alleen horizontale swipes (groter dan 50px, meer horizontaal dan verticaal)
+    if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+      const idx = VIEW_ORDER.indexOf(currentView);
+      if (diffX < 0 && idx < VIEW_ORDER.length - 1) {
+        showView(VIEW_ORDER[idx + 1]);
+      } else if (diffX > 0 && idx > 0) {
+        showView(VIEW_ORDER[idx - 1]);
+      }
+    }
+  }, { passive: true });
+}
+
 // Helper: test of een Date op dezelfde lokale kalenderdag valt als een ref.
 function isSameLocalDay(d, ref) {
   return (
@@ -156,44 +260,37 @@ function isSameLocalDay(d, ref) {
   );
 }
 
-// Bouwt een 24-punts temperatuurverloop voor de hele kalenderdag (00..23u):
-// - Voorbije uren: gemeten temperatuur uit de history snapshots
-// - Huidige uur:   actuele liveweer.temp
-// - Toekomstige uren: voorspelling uit uurverwachting
-// Ontbrekende uren blijven `null` zodat de lineChart die overslaat.
+// Bouwt een 24-punts temperatuurverloop voor de hele kalenderdag (00..23u)
 function buildFullDayTempPoints(data, historyEntries) {
   const now = new Date();
   const currentHour = now.getHours();
 
   const byHour = new Array(24).fill(null);
 
-  // 1) Voorbije uren uit history (filter op vandaag, lokale klok-uur)
   if (Array.isArray(historyEntries)) {
     for (const e of historyEntries) {
       const d = new Date(e.ts);
       if (Number.isNaN(d.getTime())) continue;
       if (!isSameLocalDay(d, now)) continue;
       const h = d.getHours();
-      if (h >= currentHour) continue; // laat huidige/toekomstige met rust
+      if (h >= currentHour) continue;
       const v = Number(e.temp);
       if (Number.isFinite(v)) byHour[h] = v;
     }
   }
 
-  // 2) Huidige uur uit liveweer
   const currentTemp = Number(data?.liveweer?.temp);
   if (Number.isFinite(currentTemp)) {
     byHour[currentHour] = currentTemp;
   }
 
-  // 3) Toekomstige uren uit uurverwachting (filter op vandaag)
   const hours = Array.isArray(data?.uurverwachting) ? data.uurverwachting : [];
   for (const u of hours) {
     const d = parseWeerliveHour(u.uur);
     if (!d) continue;
     if (!isSameLocalDay(d, now)) continue;
     const h = d.getHours();
-    if (h <= currentHour) continue; // overschrijf niet wat al is gezet
+    if (h <= currentHour) continue;
     const v = Number(u.temp);
     if (Number.isFinite(v)) byHour[h] = v;
   }
@@ -227,7 +324,6 @@ async function openTempChart() {
     return;
   }
 
-  // Toon elk 3e label op de x-as om clutter te vermijden
   const sparsePoints = points.map((p, i) => ({
     label: i % 3 === 0 ? p.label : '',
     value: p.value,
@@ -245,9 +341,6 @@ async function openTempChart() {
   body.innerHTML = chart;
 }
 
-// Bouwt een 24-punts zonnekracht-verloop (gr in W/m²) voor de hele
-// kalenderdag. Zelfde strategie als buildFullDayTempPoints: voorbije
-// uren uit history, huidige uur uit liveweer, toekomstige uit uurverwachting.
 function buildFullDayGrPoints(data, historyEntries) {
   const now = new Date();
   const currentHour = now.getHours();
@@ -311,53 +404,30 @@ async function openSunChart() {
     return;
   }
 
-  // UV-punten worden afgeleid uit gr met dezelfde benadering als in de
-  // sun-arc (UVI ≈ gr/100). Zo staat het direct naast de meetwaarde.
-  const uvPoints = grPoints.map((p) => ({
-    label: p.label,
-    value: p.value != null ? uvFromGr(p.value) : null,
-  }));
-
-  // Piek-waarden voor de samenvatting
   const grValues = grPoints.map((p) => p.value).filter((v) => v != null);
   const peakGr = grValues.length > 0 ? Math.round(Math.max(...grValues)) : null;
-  const peakUv = peakGr != null ? uvFromGr(peakGr) : null;
 
   const sparseGr = grPoints.map((p, i) => ({
-    label: i % 3 === 0 ? p.label : '',
-    value: p.value,
-  }));
-  const sparseUv = uvPoints.map((p, i) => ({
     label: i % 3 === 0 ? p.label : '',
     value: p.value,
   }));
 
   const grChart = renderLineChart(sparseGr, {
     width: 480,
-    height: 150,
+    height: 200,
     padX: 34,
-    padY: 24,
+    padY: 28,
     stroke: '#ffb454',
     fill: 'rgba(255,180,84,0.22)',
     unit: '',
     showLabels: true,
   });
-  const uvChart = renderLineChart(sparseUv, {
-    width: 480,
-    height: 130,
-    padX: 34,
-    padY: 22,
-    stroke: '#c3a1ff',
-    fill: 'rgba(195,161,255,0.22)',
-    unit: '',
-    showLabels: true,
-  });
 
   const summary =
-    peakGr != null && peakUv != null
+    peakGr != null
       ? `<div class="sun-chart-summary">Piek vandaag: <strong>${esc(
           String(peakGr)
-        )}&nbsp;W/m²</strong> · UV <strong>${esc(String(peakUv))}</strong></div>`
+        )}&nbsp;W/m²</strong></div>`
       : '';
 
   body.innerHTML = `
@@ -365,26 +435,34 @@ async function openSunChart() {
     <div class="sun-chart-sub">
       <span class="sub-label">Zonnekracht (W/m²)</span>
       ${grChart}
-    </div>
-    <div class="sun-chart-sub">
-      <span class="sub-label">UV-index (schatting)</span>
-      ${uvChart}
     </div>`;
 }
 
 function showError(message) {
-  if (latestData) return; // houd oude data tonen
+  if (latestData) return;
   setHTML(
     'view-today',
     `<div class="state-msg error">Geen verbinding.<br>${esc(message)}</div>`
   );
 }
 
-function onWeatherUpdate(data) {
+async function onWeatherUpdate(data) {
   latestData = data;
   updateMeta(data);
   updateAlertBanner(data);
+  updateAtmosphere();
+  updateWeatherParticles();
   renderCurrentView();
+
+  // Haal hourly history op (voor druktrend e.d.)
+  try {
+    const res = await getHistory('hourly');
+    if (res && Array.isArray(res.entries)) {
+      latestHourlyHistory = res.entries;
+    }
+  } catch (e) {
+    // negeer
+  }
 }
 
 function onWeatherError(err) {
@@ -398,6 +476,12 @@ function main() {
   bindTabs();
   tickClock();
   setInterval(tickClock, CLOCK_MS);
+
+  // Initiële tab indicator positie
+  requestAnimationFrame(updateTabIndicator);
+
+  // Atmosfeer elke minuut updaten
+  setInterval(updateAtmosphere, ATMOSPHERE_MS);
 
   // refresh meta elke 30s zodat "X min geleden" blijft lopen
   setInterval(() => updateMeta(latestData), 30_000);
