@@ -1,0 +1,934 @@
+/* Weer-display — donker thema, ronde layout
+   Schaling via --dial custom property zodat alles meeschaalt met de resolutie.
+*/
+
+:root {
+  --dial: min(100vw, 100vh);
+  --bg-center: #1a2540;
+  --bg-edge: #07101f;
+  --fg: #f4f6fb;
+  --muted: #8a93a6;
+  --accent: #ffb454;
+  --accent-soft: rgba(255, 180, 84, 0.18);
+  --blue: #7aa8ff;
+  --blue-soft: rgba(122, 168, 255, 0.15);
+  --warn: #ff5a5f;
+  --warn-soft: rgba(255, 90, 95, 0.18);
+  --ok: #6fd598;
+  --card: rgba(255, 255, 255, 0.05);
+  --card-border: rgba(255, 255, 255, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 300;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+/* -- Dial (ronde wrapper) ------------------------------------------------ */
+
+.dial {
+  position: relative;
+  width: var(--dial);
+  height: var(--dial);
+  margin: 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 30%, var(--bg-center) 0%, var(--bg-edge) 70%);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: calc(var(--dial) * 0.04);
+}
+
+/* -- Tabs ---------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  justify-content: center;
+  gap: calc(var(--dial) * 0.012);
+  padding: calc(var(--dial) * 0.015) 0 calc(var(--dial) * 0.006);
+}
+
+.tab {
+  min-height: calc(var(--dial) * 0.06);
+  padding: 0 calc(var(--dial) * 0.022);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.02);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, color 0.15s;
+  border: 1px solid transparent;
+}
+
+.tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: rgba(255, 180, 84, 0.4);
+}
+
+/* -- Warning button -----------------------------------------------------
+   Altijd zichtbaar: gedempt (muted) als er geen alarm is, rood pulserend
+   bij een actief alarm.
+*/
+
+/* Expliciete override: `display: flex` zou anders de user-agent
+   `[hidden] { display: none }` overrulen. */
+.warning-btn[hidden] {
+  display: none;
+}
+
+.warning-btn {
+  position: absolute;
+  /* Op gelijke hoogte als het midden van de temp-regel. Binnen de ronde dial
+     zit deze positie (~20% vanaf boven, 14% vanaf rechts) veilig binnen de
+     cirkel zonder te worden afgesneden. */
+  top: calc(var(--dial) * 0.2);
+  right: calc(var(--dial) * 0.14);
+  width: calc(var(--dial) * 0.065);
+  height: calc(var(--dial) * 0.065);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  border: 1.5px solid rgba(138, 147, 166, 0.45);
+  padding: calc(var(--dial) * 0.008);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+  z-index: 10;
+}
+
+.warning-btn.has-alarm {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn);
+  opacity: 1;
+  box-shadow: 0 0 calc(var(--dial) * 0.015) rgba(255, 90, 95, 0.45);
+  animation: pulse-warn 2s ease-in-out infinite;
+}
+
+.warning-btn svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+@keyframes pulse-warn {
+  0%, 100% { box-shadow: 0 0 calc(var(--dial) * 0.012) rgba(255, 90, 95, 0.4); }
+  50%      { box-shadow: 0 0 calc(var(--dial) * 0.025) rgba(255, 90, 95, 0.75); }
+}
+
+/* -- Stage -------------------------------------------------------------- */
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: calc(var(--dial) * 0.004) calc(var(--dial) * 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.view {
+  display: none;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.view::-webkit-scrollbar {
+  display: none;
+}
+
+.view.active {
+  display: flex;
+}
+
+/* -- Alert banner (modal over de stage) -------------------------------- */
+
+.alert {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 78%;
+  max-width: calc(var(--dial) * 0.7);
+  padding: calc(var(--dial) * 0.02) calc(var(--dial) * 0.028);
+  background: rgba(20, 10, 15, 0.92);
+  border: 1px solid rgba(255, 90, 95, 0.65);
+  border-radius: calc(var(--dial) * 0.025);
+  color: #ffe5e6;
+  font-size: calc(var(--dial) * 0.017);
+  text-align: center;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 calc(var(--dial) * 0.01) calc(var(--dial) * 0.03) rgba(0, 0, 0, 0.6);
+  z-index: 20;
+}
+
+.alert strong {
+  color: var(--warn);
+  display: block;
+  font-weight: 600;
+  margin-bottom: calc(var(--dial) * 0.008);
+  font-size: calc(var(--dial) * 0.02);
+}
+
+.alert-close {
+  position: absolute;
+  top: calc(var(--dial) * 0.005);
+  right: calc(var(--dial) * 0.008);
+  width: calc(var(--dial) * 0.035);
+  height: calc(var(--dial) * 0.035);
+  font-size: calc(var(--dial) * 0.028);
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+
+.alert-close:hover,
+.alert-close:active {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* -- Generic modal (gebruikt door temp-chart popup) --------------------
+   Overlay vult de hele stage met een lichte dim+blur; clicks op de
+   overlay-achtergrond sluiten het venster. De kaart binnenin is de
+   eigenlijke modal-content.
+*/
+
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 25;
+}
+
+/* `display: flex` hierboven zou het native `[hidden]` gedrag overrulen
+   (specificity), dus we herstellen het expliciet. Zonder deze regel is
+   de modal-overlay permanent zichtbaar. */
+.modal-overlay[hidden] {
+  display: none;
+}
+
+.modal-card {
+  position: relative;
+  width: 86%;
+  max-width: calc(var(--dial) * 0.78);
+  padding: calc(var(--dial) * 0.022) calc(var(--dial) * 0.028) calc(var(--dial) * 0.024);
+  background: rgba(12, 18, 32, 0.98);
+  border: 1px solid var(--card-border);
+  border-radius: calc(var(--dial) * 0.025);
+  color: var(--fg);
+  box-shadow: 0 calc(var(--dial) * 0.012) calc(var(--dial) * 0.04) rgba(0, 0, 0, 0.65);
+}
+
+.modal-card .modal-title {
+  display: block;
+  color: var(--accent);
+  font-weight: 500;
+  font-size: calc(var(--dial) * 0.02);
+  letter-spacing: 0.03em;
+  text-align: center;
+  margin-bottom: calc(var(--dial) * 0.012);
+  text-transform: uppercase;
+}
+
+.modal-card .modal-body {
+  width: 100%;
+}
+
+.modal-card .modal-body svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Zonnekracht-modal: kleine samenvatting + twee gestapelde sub-grafieken. */
+.sun-chart-summary {
+  text-align: center;
+  font-size: calc(var(--dial) * 0.014);
+  color: var(--muted);
+  margin-bottom: calc(var(--dial) * 0.008);
+}
+
+.sun-chart-summary strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sun-chart-sub {
+  width: 100%;
+  margin-top: calc(var(--dial) * 0.006);
+}
+
+.sun-chart-sub .sub-label {
+  display: block;
+  font-size: calc(var(--dial) * 0.011);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  margin-bottom: calc(var(--dial) * 0.002);
+}
+
+.modal-close {
+  position: absolute;
+  top: calc(var(--dial) * 0.006);
+  right: calc(var(--dial) * 0.01);
+  width: calc(var(--dial) * 0.04);
+  height: calc(var(--dial) * 0.04);
+  font-size: calc(var(--dial) * 0.03);
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+
+.modal-close:hover,
+.modal-close:active {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* -- Footer meta -------------------------------------------------------- */
+
+.meta {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: calc(var(--dial) * 0.012);
+  padding: calc(var(--dial) * 0.006) 0 calc(var(--dial) * 0.02);
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.017);
+  font-variant-numeric: tabular-nums;
+}
+
+.meta .sep {
+  opacity: 0.4;
+}
+
+.meta.stale #last-update {
+  color: var(--warn);
+}
+
+/* -- Today view --------------------------------------------------------- */
+
+.today-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--dial) * 0.005);
+  width: 100%;
+  height: 100%;
+}
+
+.hero {
+  /* 3-kolom grid: de temp-block zit in de middelste (auto) kolom en is
+     daardoor altijd exact horizontaal gecentreerd op de dial. Het icoon
+     zit in kolom 1 en schuift naar rechts, zodat het naast de temp komt
+     zonder de centrering te verstoren. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: 100%;
+  margin-top: calc(var(--dial) * 0.005);
+}
+
+.icon-big {
+  width: calc(var(--dial) * 0.14);
+  height: calc(var(--dial) * 0.14);
+  color: var(--accent);
+  justify-self: end;
+  margin-right: calc(var(--dial) * 0.015);
+}
+
+.icon-big svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.temp-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.temp-big {
+  font-size: calc(var(--dial) * 0.15);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  /* Klikbaar als button — strip default button-styling */
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s, text-shadow 0.15s;
+}
+
+.temp-big:hover,
+.temp-big:active {
+  color: var(--accent);
+  text-shadow: 0 0 calc(var(--dial) * 0.012) rgba(255, 180, 84, 0.25);
+}
+
+.temp-big sup {
+  font-size: 0.38em;
+  font-weight: 300;
+  vertical-align: top;
+  margin-left: 0.05em;
+  color: var(--muted);
+}
+
+.feels-like {
+  font-size: calc(var(--dial) * 0.024);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  margin-top: calc(var(--dial) * 0.004);
+}
+
+/* -- Stats grid --------------------------------------------------------- */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: start;
+  gap: calc(var(--dial) * 0.008);
+  width: 100%;
+  /* Reserveer ruimte boven de grid voor de (absoluut gepositioneerde)
+     windroos boven de Wind-stat. Zo blijven Wind-label en -waarde op
+     dezelfde regel uitgelijnd als de andere stats. */
+  padding-top: calc(var(--dial) * 0.06);
+  margin-top: calc(var(--dial) * 0.002);
+  /* Extra ruimte onder de stats-rij, zodat hij los komt van de
+     uurverwachting-strip eronder. */
+  margin-bottom: calc(var(--dial) * 0.028);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--dial) * 0.001);
+  position: relative;
+}
+
+.stat .label {
+  font-size: calc(var(--dial) * 0.013);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.stat .value {
+  font-size: calc(var(--dial) * 0.019);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.stat .sublabel {
+  font-size: calc(var(--dial) * 0.012);
+  color: var(--muted);
+  text-transform: lowercase;
+}
+
+.wind-stat .wind-arrow-wrap {
+  position: absolute;
+  top: calc(var(--dial) * -0.058);
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--dial) * 0.05);
+  height: calc(var(--dial) * 0.05);
+  margin: 0;
+}
+
+.wind-stat .wind-arrow-wrap svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* -- Verwachting banner ------------------------------------------------- */
+
+.verw-text {
+  margin-top: calc(var(--dial) * 0.004);
+  padding: calc(var(--dial) * 0.007) calc(var(--dial) * 0.016);
+  font-size: calc(var(--dial) * 0.015);
+  color: var(--fg);
+  opacity: 0.78;
+  font-style: italic;
+  text-align: center;
+  max-width: 92%;
+  background: var(--card);
+  border-radius: calc(var(--dial) * 0.02);
+  border: 1px solid var(--card-border);
+}
+
+/* -- Hour strip --------------------------------------------------------- */
+
+.hour-strip {
+  display: flex;
+  gap: calc(var(--dial) * 0.007);
+  overflow-x: auto;
+  width: 100%;
+  padding: calc(var(--dial) * 0.003) 0;
+  margin-top: calc(var(--dial) * 0.003);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hour-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.hour-cell {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: calc(var(--dial) * 0.055);
+  padding: calc(var(--dial) * 0.005);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: calc(var(--dial) * 0.01);
+  gap: calc(var(--dial) * 0.002);
+}
+
+.hour-cell .hour-time {
+  font-size: calc(var(--dial) * 0.013);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hour-cell .hour-icon {
+  width: calc(var(--dial) * 0.028);
+  height: calc(var(--dial) * 0.028);
+  color: var(--accent);
+}
+
+.hour-cell .hour-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.hour-cell .hour-temp {
+  font-size: calc(var(--dial) * 0.017);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.hour-cell .hour-rain {
+  font-size: calc(var(--dial) * 0.011);
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+  min-height: calc(var(--dial) * 0.012);
+}
+
+/* -- Sun-wrap (onderaan de today view) ---------------------------------
+   Gereserveerde hoogte zodat de sun-arc kan groeien met buienradar grafiek
+   zonder dat de inhoud erboven verspringt.
+*/
+
+.sun-wrap {
+  margin-top: auto;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-top: calc(var(--dial) * 0.005);
+  min-height: calc(var(--dial) * 0.22);
+}
+
+.sun-arc {
+  width: 100%;
+  max-width: calc(var(--dial) * 0.62);
+}
+
+.sun-arc svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* -- Forecast view ------------------------------------------------------ */
+
+.forecast-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
+  gap: calc(var(--dial) * 0.012);
+}
+
+.temp-ribbon-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 0 calc(var(--dial) * 0.01);
+}
+
+.temp-ribbon {
+  width: 100%;
+  max-width: calc(var(--dial) * 0.88);
+  height: auto;
+  display: block;
+}
+
+.forecast-days {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: calc(var(--dial) * 0.008);
+  width: 100%;
+}
+
+.forecast-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: calc(var(--dial) * 0.01) calc(var(--dial) * 0.005);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: calc(var(--dial) * 0.015);
+  gap: calc(var(--dial) * 0.004);
+}
+
+.forecast-day .day-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.forecast-day .day-name {
+  font-size: calc(var(--dial) * 0.016);
+  color: var(--fg);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.forecast-day .day-date {
+  font-size: calc(var(--dial) * 0.011);
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+
+.forecast-day .day-icon {
+  width: calc(var(--dial) * 0.045);
+  height: calc(var(--dial) * 0.045);
+  color: var(--accent);
+}
+
+.forecast-day .day-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.forecast-day .day-temps {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.forecast-day .day-temps .tmax {
+  color: var(--fg);
+  font-weight: 400;
+  font-size: calc(var(--dial) * 0.022);
+}
+
+.forecast-day .day-temps .tsep {
+  color: var(--muted);
+  opacity: 0.6;
+  font-size: calc(var(--dial) * 0.014);
+}
+
+.forecast-day .day-temps .tmin {
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.014);
+}
+
+.day-wind {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  font-size: calc(var(--dial) * 0.012);
+}
+
+.day-wind-arrow {
+  width: calc(var(--dial) * 0.022);
+  height: calc(var(--dial) * 0.022);
+  display: inline-flex;
+}
+
+.day-wind-arrow svg {
+  width: 100%;
+  height: 100%;
+}
+
+.day-wind-label {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* Inline mini-bar binnen een forecast-day voor rain/sun percentage */
+
+.mini-bar {
+  position: relative;
+  width: 92%;
+  height: calc(var(--dial) * 0.018);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: calc(var(--dial) * 0.004);
+  overflow: hidden;
+}
+
+.mini-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+}
+
+.mini-bar.rain .mini-bar-fill {
+  background: linear-gradient(90deg, rgba(122, 168, 255, 0.35), rgba(122, 168, 255, 0.75));
+}
+
+.mini-bar.sun .mini-bar-fill {
+  background: linear-gradient(90deg, rgba(255, 180, 84, 0.35), rgba(255, 180, 84, 0.8));
+}
+
+.mini-bar-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--dial) * 0.011);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  mix-blend-mode: normal;
+  letter-spacing: 0.01em;
+}
+
+/* Week-highlights onder de forecast-kaarten */
+
+.week-highlights {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: calc(var(--dial) * 0.008);
+  width: 100%;
+  padding-top: calc(var(--dial) * 0.004);
+}
+
+.highlight {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: calc(var(--dial) * 0.008) calc(var(--dial) * 0.004);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: calc(var(--dial) * 0.012);
+  text-align: center;
+}
+
+.highlight .h-icon {
+  font-size: calc(var(--dial) * 0.02);
+  line-height: 1;
+}
+
+.highlight .h-label {
+  font-size: calc(var(--dial) * 0.011);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.highlight .h-value {
+  font-size: calc(var(--dial) * 0.014);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- Chart blocks ------------------------------------------------------- */
+
+.chart-block {
+  width: 100%;
+  margin-top: calc(var(--dial) * 0.006);
+}
+
+.chart-block h3 {
+  font-size: calc(var(--dial) * 0.014);
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: calc(var(--dial) * 0.003);
+  text-align: center;
+}
+
+.chart-block svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-row {
+  display: flex;
+  gap: calc(var(--dial) * 0.01);
+  width: 100%;
+  margin-top: calc(var(--dial) * 0.006);
+}
+
+.chart-block.half {
+  flex: 1;
+  margin-top: 0;
+}
+
+/* -- History view ------------------------------------------------------- */
+
+.history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.02);
+  padding: calc(var(--dial) * 0.05);
+}
+
+.history-list {
+  width: 100%;
+  overflow-y: auto;
+  max-height: calc(var(--dial) * 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--dial) * 0.005);
+  scrollbar-width: none;
+}
+
+.history-list::-webkit-scrollbar {
+  display: none;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: center;
+  gap: calc(var(--dial) * 0.012);
+  padding: calc(var(--dial) * 0.007) calc(var(--dial) * 0.012);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: calc(var(--dial) * 0.01);
+  font-size: calc(var(--dial) * 0.016);
+}
+
+.history-row .h-date {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: calc(var(--dial) * 0.07);
+}
+
+.history-row .h-icon {
+  width: calc(var(--dial) * 0.028);
+  height: calc(var(--dial) * 0.028);
+  color: var(--accent);
+}
+
+.history-row .h-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.history-row .h-samenv {
+  color: var(--fg);
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(var(--dial) * 0.014);
+}
+
+.history-row .h-temps {
+  font-variant-numeric: tabular-nums;
+}
+
+.history-row .h-temps .tmax {
+  color: var(--fg);
+}
+
+.history-row .h-temps .tmin {
+  color: var(--muted);
+}
+
+.history-row .h-rain {
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+  min-width: calc(var(--dial) * 0.04);
+  text-align: right;
+}
+
+/* -- State messages ---------------------------------------------------- */
+
+.state-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.02);
+  gap: calc(var(--dial) * 0.01);
+  padding: calc(var(--dial) * 0.05);
+}
+
+.state-msg.error {
+  color: var(--warn);
+}
