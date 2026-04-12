@@ -52,8 +52,7 @@ function windGauge(l) {
 
   const centerContent = `
     <circle cx="50" cy="50" r="24" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
-    ${arrowSvg}
-    <text x="50" y="72" fill="#8a93a6" font-size="7" text-anchor="middle" font-family="sans-serif">${esc(dir)}</text>`;
+    ${arrowSvg}`;
 
   return renderCircularGauge({
     value: val,
@@ -87,7 +86,7 @@ function humidityGauge(l) {
 }
 
 // Circulaire gauge voor luchtdruk
-function pressureGauge(l, trendHtml) {
+function pressureGauge(l, trendSublabel) {
   const val = Number(l.luchtd);
 
   return renderCircularGauge({
@@ -98,7 +97,7 @@ function pressureGauge(l, trendHtml) {
     unit: '',
     color: '#6fd598',
     size: 100,
-    sublabel: '',
+    sublabel: trendSublabel || '',
   });
 }
 
@@ -148,7 +147,7 @@ export function renderToday(data, opts = {}) {
     </div>`;
 
   // Circulaire gauges
-  const pressureTrendHtml = opts.pressureTrendHtml || '';
+  const trendText = opts.pressureTrendText || '';
   const gauges = `
     <div class="gauge-grid">
       <div class="gauge-cell">
@@ -158,8 +157,7 @@ export function renderToday(data, opts = {}) {
         ${humidityGauge(l)}
       </div>
       <div class="gauge-cell">
-        ${pressureGauge(l, pressureTrendHtml)}
-        ${pressureTrendHtml ? `<div class="gauge-sub">${pressureTrendHtml}</div>` : ''}
+        ${pressureGauge(l, trendText)}
       </div>
     </div>`;
 

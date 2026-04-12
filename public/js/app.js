@@ -7,7 +7,7 @@ import { renderHistory } from './views/history.js';
 import { renderLineChart } from './components/lineChart.js';
 import { sunProgress } from './util/sun.js';
 import { applySkyColors, weatherParticleClass } from './util/atmosphere.js';
-import { computePressureTrend, renderPressureTrend } from './components/pressureTrend.js';
+import { computePressureTrend } from './components/pressureTrend.js';
 
 const POLL_MS = 10 * 60 * 1000; // 10 minuten
 const CLOCK_MS = 1000;
@@ -53,7 +53,7 @@ function showView(name) {
 async function renderCurrentView() {
   if (currentView === 'today') {
     // Haal druktrend op
-    let pressureTrendHtml = '';
+    let pressureTrendText = '';
     if (latestData?.liveweer) {
       try {
         if (!latestHourlyHistory) {
@@ -61,12 +61,12 @@ async function renderCurrentView() {
           if (res && Array.isArray(res.entries)) latestHourlyHistory = res.entries;
         }
         const trend = computePressureTrend(latestData.liveweer.luchtd, latestHourlyHistory || []);
-        pressureTrendHtml = renderPressureTrend(trend);
+        pressureTrendText = `${trend.arrow} ${trend.label}`;
       } catch (e) {
         // negeer — trend is optioneel
       }
     }
-    setHTML('view-today', renderToday(latestData, { pressureTrendHtml }));
+    setHTML('view-today', renderToday(latestData, { pressureTrendText }));
   } else if (currentView === 'forecast') {
     setHTML('view-forecast', renderForecast(latestData));
   } else if (currentView === 'history') {
