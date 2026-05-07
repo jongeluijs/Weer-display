@@ -21,6 +21,13 @@ let state = {
   renaming: null,      // id van device waarvan label op dit moment bewerkt wordt
 };
 
+// Status-cache per device-id voor live aan/uit-indicatie op de plattegrond.
+// Wordt gevuld door pollPlacedStatuses() en bijgewerkt na elke actie.
+const statusById = new Map();
+
+const LONG_PRESS_MS = 500;
+const PRESS_MOVE_TOLERANCE = 12;
+
 let listeners = {
   onSave: null,        // (device) => Promise<void>
   onRemove: null,      // (id) => Promise<void>
@@ -132,6 +139,7 @@ export function setFloorplanDevices(devices) {
   state.devices = Array.isArray(devices) ? devices : [];
   renderIcons();
   if (state.editing) renderEditList();
+  pollPlacedStatuses();
 }
 
 export function setDiscoveredDevices(payload) {
@@ -182,12 +190,54 @@ function iconHtml(d) {
   const xPct = (d.x * 100).toFixed(2);
   const yPct = (d.y * 100).toFixed(2);
   const label = esc(deviceDisplayName(d));
+  const stateAttr = stateAttrFor(statusById.get(d.id));
   return `
     <div class="floor-icon" data-id="${esc(d.id)}" style="left:${xPct}%;top:${yPct}%">
-      <span class="floor-icon-svg" data-type="${esc(d.type)}">${getDeviceIcon(d.type)}</span>
+      <span class="floor-icon-svg" data-type="${esc(d.type)}" data-state="${stateAttr}">${getDeviceIcon(d.type)}</span>
       <span class="floor-icon-label">${label}</span>
       <button type="button" class="floor-icon-remove" data-action="remove" aria-label="Verwijder ${label}">&times;</button>
     </div>`;
+}
+
+function stateAttrFor(status) {
+  if (!status) return 'unknown';
+  if (status.online === false || status.reachable === false) return 'offline';
+  if (status.on === true) return 'on';
+  if (status.on === false) return 'off';
+  if (status.online === true) return 'online';
+  return 'unknown';
+}
+
+function controllableDriver(driver) {
+  return driver === 'hue_light' || driver === 'shelly';
+}
+
+function pollPlacedStatuses() {
+  if (!listeners.onStatus) return;
+  for (const dev of state.devices) {
+    if (!controllableDriver(dev.driver)) continue;
+    void pollOne(dev.id);
+  }
+}
+
+async function pollOne(id) {
+  if (!listeners.onStatus) return null;
+  try {
+    const status = await listeners.onStatus(id);
+    statusById.set(id, status || null);
+    updateIconState(id);
+    return status;
+  } catch {
+    statusById.set(id, { online: false });
+    updateIconState(id);
+    return null;
+  }
+}
+
+function updateIconState(id) {
+  const icon = document.querySelector(`.floor-icon[data-id="${CSS.escape(id)}"] .floor-icon-svg`);
+  if (!icon) return;
+  icon.setAttribute('data-state', stateAttrFor(statusById.get(id)));
 }
 
 function priorityRank(d) {
@@ -348,6 +398,7 @@ export function bindFloorplanInteractions() {
     });
     canvas.addEventListener('drop', onCanvasDrop);
     bindIconDragging(canvas);
+    bindIconPress(canvas);
   }
 
   if (list) {
@@ -365,12 +416,94 @@ function onCanvasClick(e) {
     if (id && listeners.onRemove) listeners.onRemove(id);
     return;
   }
-  if (state.editing) return; // in edit-mode opent geen modal
-  const icon = e.target.closest('.floor-icon');
-  if (!icon) return;
-  const id = icon.dataset.id;
-  const dev = state.devices.find((d) => d.id === id);
-  if (dev) openDeviceModal(dev);
+  // Tikken op iconen in normale mode wordt door bindIconPress afgehandeld:
+  // korte tik = standaardactie, langer = popup.
+}
+
+function bindIconPress(canvas) {
+  let pressTimer = null;
+  let pressedIcon = null;
+  let longPressed = false;
+  let startX = 0;
+  let startY = 0;
+
+  function clearPress() {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+    pressedIcon = null;
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (state.editing) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const icon = e.target.closest('.floor-icon');
+    if (!icon) return;
+    if (e.target.closest('[data-action]')) return; // bv. remove-knop
+    pressedIcon = icon;
+    longPressed = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    pressTimer = setTimeout(() => {
+      longPressed = true;
+      pressTimer = null;
+      const id = pressedIcon?.dataset.id;
+      const dev = state.devices.find((d) => d.id === id);
+      if (dev) openDeviceModal(dev);
+    }, LONG_PRESS_MS);
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!pressedIcon) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (Math.hypot(dx, dy) > PRESS_MOVE_TOLERANCE) clearPress();
+  });
+
+  canvas.addEventListener('pointerup', async () => {
+    if (state.editing) { clearPress(); return; }
+    if (!pressedIcon) return;
+    const icon = pressedIcon;
+    if (longPressed) {
+      // Modal werd geopend in pressTimer; vang de bijbehorende
+      // synthetische click op zodat de overlay niet direct weer sluit.
+      const swallow = (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      document.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener('click', swallow, true), 200);
+      clearPress();
+      return;
+    }
+    clearPress();
+    const id = icon.dataset.id;
+    const dev = state.devices.find((d) => d.id === id);
+    if (dev) await runDefaultAction(dev);
+  });
+
+  canvas.addEventListener('pointercancel', clearPress);
+  canvas.addEventListener('pointerleave', clearPress);
+}
+
+async function runDefaultAction(device) {
+  // Schakelbare apparaten: aan/uit togglen met optimistische UI-update.
+  if (controllableDriver(device.driver) && listeners.onAction) {
+    const prev = statusById.get(device.id);
+    if (prev && typeof prev.on === 'boolean') {
+      statusById.set(device.id, { ...prev, on: !prev.on });
+      updateIconState(device.id);
+    }
+    try {
+      await listeners.onAction(device.id, { type: 'toggle' });
+    } catch (err) {
+      console.warn('[floorplan] toggle fout:', err);
+    } finally {
+      await pollOne(device.id);
+    }
+    return;
+  }
+  // Niet-schakelbare apparaten: popup openen als alternatief.
+  openDeviceModal(device);
 }
 
 function onListClick(e) {
@@ -506,24 +639,25 @@ function bindIconDragging(canvas) {
   });
 }
 
+// Mireds ↔ Kelvin. Hue-lampen lopen typisch 153 (~6500K, koud) tot 500 (2000K, warm).
+function miredsToKelvin(mireds) {
+  if (!Number.isFinite(mireds) || mireds <= 0) return null;
+  return Math.round(1_000_000 / mireds / 100) * 100;
+}
+
+function briToPercent(bri) {
+  if (!Number.isFinite(bri)) return null;
+  return Math.round((Math.max(1, Math.min(254, bri)) / 254) * 100);
+}
+
 async function openDeviceModal(device) {
   state.selectedDevice = device;
   const modal = document.getElementById('floor-modal');
   const body = document.getElementById('floor-modal-body');
   if (!modal || !body) return;
   modal.hidden = false;
-  body.innerHTML = `
-    <strong class="floor-modal-title">${esc(deviceDisplayName(device))}</strong>
-    <div class="floor-modal-meta">
-      <span class="floor-modal-type">${esc(deviceTypeLabel(device.type))}</span>
-      ${device.vendor ? `<span>${esc(device.vendor)}</span>` : ''}
-      ${device.ip ? `<span>${esc(device.ip)}</span>` : ''}
-      ${device.hostname ? `<span>${esc(device.hostname)}</span>` : ''}
-    </div>
-    <div class="floor-modal-status" id="floor-modal-status">
-      <div class="state-msg">Status ophalen…</div>
-    </div>`;
-
+  body.innerHTML = renderPopupShell(device);
+  // Direct status ophalen (vult de live regio in)
   let status = null;
   try {
     if (listeners.onStatus) status = await listeners.onStatus(device.id);
@@ -531,59 +665,247 @@ async function openDeviceModal(device) {
     status = { online: false, error: err.message };
   }
   if (state.selectedDevice?.id !== device.id) return;
+  statusById.set(device.id, status || null);
+  updateIconState(device.id);
   renderStatus(device, status);
 }
 
+function renderPopupShell(device) {
+  const name = esc(deviceDisplayName(device));
+  const sub = esc(
+    [deviceTypeLabel(device.type), device.vendor].filter(Boolean).join(' · ')
+  );
+  return `
+    <header class="device-popup-header">
+      <span class="device-popup-icon" data-type="${esc(device.type)}" id="device-popup-icon">
+        ${getDeviceIcon(device.type)}
+      </span>
+      <div class="device-popup-title-block">
+        <strong class="device-popup-name">${name}</strong>
+        <span class="device-popup-sub">${sub}</span>
+      </div>
+    </header>
+
+    <div class="device-popup-status-row" id="device-popup-status">
+      <div class="state-msg">Status ophalen…</div>
+    </div>
+
+    <section class="device-popup-controls" id="device-popup-controls" hidden></section>
+
+    <section class="device-popup-info">
+      ${renderInfoGrid(device)}
+    </section>`;
+}
+
+function renderInfoGrid(device) {
+  const rows = [];
+  if (device.ip) rows.push(['IP', esc(device.ip)]);
+  if (device.mac) rows.push(['MAC', esc(device.mac)]);
+  if (device.hostname) rows.push(['Hostname', esc(device.hostname)]);
+  if (device.driver && device.driver !== 'generic') {
+    rows.push(['Driver', esc(device.driver)]);
+  }
+  if (rows.length === 0) return '';
+  return `
+    <dl class="device-popup-info-grid">
+      ${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}
+    </dl>`;
+}
+
 function renderStatus(device, status) {
-  const slot = document.getElementById('floor-modal-status');
-  if (!slot) return;
+  const statusSlot = document.getElementById('device-popup-status');
+  const controlsSlot = document.getElementById('device-popup-controls');
+  const iconSlot = document.getElementById('device-popup-icon');
+  if (!statusSlot || !controlsSlot) return;
+
   if (!status) {
-    slot.innerHTML = '<div class="state-msg">Geen status</div>';
+    statusSlot.innerHTML = '<div class="state-msg">Geen status</div>';
+    controlsSlot.hidden = true;
     return;
   }
-  const online = status.online;
+
+  // Status-regel met online dot + extra context
+  const online = !!status.online;
   const dot = `<span class="status-dot ${online ? 'online' : 'offline'}"></span>`;
-  const lines = [`<div class="floor-status-row">${dot}${online ? 'Online' : 'Offline'}</div>`];
+  const labelBits = [online ? 'Online' : 'Offline'];
+  if (online && status.reachable === false) labelBits.push('niet bereikbaar');
+  if (online && status.swversion) labelBits.push(`fw ${esc(status.swversion)}`);
+  const errorHtml = status.error
+    ? `<div class="floor-status-error">${esc(status.error)}</div>`
+    : '';
+  statusSlot.innerHTML = `
+    <span class="device-popup-status-line">${dot}<span>${labelBits.join(' · ')}</span></span>
+    ${errorHtml}`;
 
-  if (status.error) {
-    lines.push(`<div class="floor-status-error">${esc(status.error)}</div>`);
-  }
-  if (typeof status.on === 'boolean') {
-    lines.push(`<div class="floor-status-row">Aan: <strong>${status.on ? 'ja' : 'nee'}</strong></div>`);
-  }
-  if (Number.isFinite(status.power_w)) {
-    lines.push(`<div class="floor-status-row">Vermogen: <strong>${Math.round(status.power_w)} W</strong></div>`);
+  // Pas icoon-state aan: groen-glow als 'aan' bekend en true
+  if (iconSlot) {
+    if (status.on === true) iconSlot.dataset.on = 'true';
+    else iconSlot.removeAttribute('data-on');
   }
 
-  // Bediening: alleen voor drivers die acties ondersteunen
-  if (device.driver === 'shelly') {
-    lines.push(`
-      <div class="floor-status-actions">
-        <button type="button" class="floor-action-btn" data-act="on">Aan</button>
-        <button type="button" class="floor-action-btn" data-act="off">Uit</button>
-        <button type="button" class="floor-action-btn" data-act="toggle">Schakel</button>
+  // Driver-specifieke bediening renderen
+  const controlsHtml = renderControls(device, status);
+  if (controlsHtml) {
+    controlsSlot.innerHTML = controlsHtml;
+    controlsSlot.hidden = false;
+    bindControlHandlers(device, status);
+  } else {
+    controlsSlot.innerHTML = '';
+    controlsSlot.hidden = true;
+  }
+}
+
+function renderControls(device, status) {
+  const driver = device.driver || 'generic';
+  const sections = [];
+
+  // On/Off toggle (Hue light + Shelly)
+  if ((driver === 'hue_light' || driver === 'shelly') && typeof status.on === 'boolean') {
+    sections.push(`
+      <div class="device-popup-control-row">
+        <span class="device-popup-control-label">Aan / uit</span>
+        <button type="button"
+                class="device-toggle ${status.on ? 'on' : 'off'}"
+                data-act="toggle"
+                aria-pressed="${status.on ? 'true' : 'false'}">
+          <span class="device-toggle-knob"></span>
+        </button>
       </div>`);
   }
 
-  slot.innerHTML = lines.join('');
+  // Helderheid (Hue light)
+  if (driver === 'hue_light' && status.supports?.brightness && Number.isFinite(status.brightness)) {
+    const pct = briToPercent(status.brightness);
+    sections.push(`
+      <div class="device-popup-slider">
+        <div class="device-popup-slider-head">
+          <span>Helderheid</span>
+          <strong data-slider-value="brightness">${pct}%</strong>
+        </div>
+        <input type="range" min="1" max="254" step="1"
+               value="${status.brightness}"
+               data-slider="brightness"
+               aria-label="Helderheid" />
+      </div>`);
+  }
 
-  slot.querySelectorAll('[data-act]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const act = btn.dataset.act;
+  // Kleurtemperatuur (Hue light)
+  if (driver === 'hue_light' && status.supports?.color_temp && Number.isFinite(status.color_temp)) {
+    const k = miredsToKelvin(status.color_temp);
+    sections.push(`
+      <div class="device-popup-slider">
+        <div class="device-popup-slider-head">
+          <span>Kleurtemperatuur</span>
+          <strong data-slider-value="color_temp">${k} K</strong>
+        </div>
+        <input type="range" min="153" max="500" step="1"
+               value="${status.color_temp}"
+               data-slider="color_temp"
+               class="ct-slider"
+               aria-label="Kleurtemperatuur" />
+      </div>`);
+  }
+
+  // Vermogen (Shelly)
+  if (driver === 'shelly' && Number.isFinite(status.power_w)) {
+    sections.push(`
+      <div class="device-popup-meter">
+        <span>Vermogen</span>
+        <strong>${Math.round(status.power_w)} W</strong>
+      </div>`);
+  }
+
+  // Hue Bridge: alleen extra info — geen bediening
+  if (driver === 'hue_bridge') {
+    const rows = [];
+    if (status.model) rows.push(['Model', esc(status.model)]);
+    if (status.bridgeid) rows.push(['Bridge-id', esc(status.bridgeid)]);
+    if (rows.length > 0) {
+      sections.push(`
+        <dl class="device-popup-info-grid">
+          ${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}
+        </dl>`);
+    }
+  }
+
+  // Hue Light extra metadata
+  if (driver === 'hue_light') {
+    const rows = [];
+    if (status.product) rows.push(['Product', esc(status.product)]);
+    if (status.model) rows.push(['Model', esc(status.model)]);
+    if (rows.length > 0) {
+      sections.push(`
+        <dl class="device-popup-info-grid">
+          ${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}
+        </dl>`);
+    }
+  }
+
+  return sections.length > 0 ? sections.join('') : '';
+}
+
+function bindControlHandlers(device, status) {
+  const slot = document.getElementById('device-popup-controls');
+  if (!slot) return;
+
+  // Toggle-knop
+  const toggle = slot.querySelector('[data-act="toggle"]');
+  if (toggle) {
+    toggle.addEventListener('click', async () => {
       if (!listeners.onAction) return;
-      btn.disabled = true;
+      toggle.disabled = true;
       try {
-        await listeners.onAction(device.id, { type: act });
+        // Direct optimistisch flippen voor snelle feedback
+        const wasOn = toggle.classList.contains('on');
+        toggle.classList.toggle('on', !wasOn);
+        toggle.classList.toggle('off', wasOn);
+        toggle.setAttribute('aria-pressed', !wasOn ? 'true' : 'false');
+        await listeners.onAction(device.id, { type: 'toggle' });
         const next = listeners.onStatus ? await listeners.onStatus(device.id) : null;
+        statusById.set(device.id, next || null);
+        updateIconState(device.id);
         renderStatus(device, next);
       } catch (err) {
-        slot.insertAdjacentHTML(
-          'beforeend',
-          `<div class="floor-status-error">${esc(err.message || String(err))}</div>`
-        );
+        showError(err);
       } finally {
-        btn.disabled = false;
+        toggle.disabled = false;
+      }
+    });
+  }
+
+  // Sliders — live label-update; serverupdate op 'change' (release)
+  slot.querySelectorAll('[data-slider]').forEach((slider) => {
+    const kind = slider.getAttribute('data-slider');
+    const valueLabel = slot.querySelector(`[data-slider-value="${kind}"]`);
+    slider.addEventListener('input', () => {
+      if (!valueLabel) return;
+      const v = Number(slider.value);
+      if (kind === 'brightness') valueLabel.textContent = `${briToPercent(v)}%`;
+      if (kind === 'color_temp') valueLabel.textContent = `${miredsToKelvin(v)} K`;
+    });
+    slider.addEventListener('change', async () => {
+      if (!listeners.onAction) return;
+      slider.disabled = true;
+      try {
+        await listeners.onAction(device.id, { type: kind, value: Number(slider.value) });
+        const next = listeners.onStatus ? await listeners.onStatus(device.id) : null;
+        statusById.set(device.id, next || null);
+        updateIconState(device.id);
+        renderStatus(device, next);
+      } catch (err) {
+        showError(err);
+      } finally {
+        slider.disabled = false;
       }
     });
   });
+}
+
+function showError(err) {
+  const slot = document.getElementById('device-popup-status');
+  if (!slot) return;
+  slot.insertAdjacentHTML(
+    'beforeend',
+    `<div class="floor-status-error">${esc(err.message || String(err))}</div>`
+  );
 }

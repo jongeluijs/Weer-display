@@ -2066,17 +2066,15 @@ button {
 }
 
 .floor-icon-svg {
-  width: calc(var(--dial) * 0.045);
-  height: calc(var(--dial) * 0.045);
+  width: calc(var(--dial) * 0.04);
+  height: calc(var(--dial) * 0.04);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #cfd8e8;
-  background: rgba(10, 18, 36, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 50%;
-  padding: calc(var(--dial) * 0.008);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  color: #e6ecf5;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))
+          drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+  transition: color 0.2s ease, filter 0.2s ease, opacity 0.2s ease;
 }
 
 .floor-icon-svg svg {
@@ -2084,16 +2082,44 @@ button {
   height: 100%;
 }
 
+.floor-icon-svg[data-state="on"] {
+  color: #ffd27a;
+  filter: drop-shadow(0 0 calc(var(--dial) * 0.012) rgba(255, 180, 84, 0.7))
+          drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.floor-icon-svg[data-state="offline"] {
+  opacity: 0.4;
+}
+
 .floor-icon-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: calc(var(--dial) * 0.004);
   font-size: calc(var(--dial) * 0.012);
   color: var(--fg);
-  background: rgba(10, 18, 36, 0.78);
+  background: rgba(10, 18, 36, 0.85);
   padding: 1px calc(var(--dial) * 0.006);
   border-radius: 4px;
   white-space: nowrap;
   max-width: calc(var(--dial) * 0.18);
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+@media (hover: hover) {
+  .floor-icon:hover .floor-icon-label {
+    opacity: 1;
+  }
+}
+
+.floor-canvas.editing .floor-icon-label {
+  opacity: 1;
 }
 
 .floor-icon-remove {
@@ -2119,8 +2145,9 @@ button {
 }
 
 .floor-canvas.editing .floor-icon-svg {
-  border-color: rgba(255, 180, 84, 0.7);
   cursor: grab;
+  filter: drop-shadow(0 0 calc(var(--dial) * 0.01) rgba(255, 180, 84, 0.85))
+          drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
 }
 
 /* -- Edit-panel ----------------------------------------------------------- */
@@ -2550,4 +2577,239 @@ button {
   border-radius: 999px;
   padding: 2px calc(var(--dial) * 0.006);
   white-space: nowrap;
+}
+
+/* -- Device popup (rich) -------------------------------------------------- */
+
+.device-popup-header {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--dial) * 0.014);
+  margin-bottom: calc(var(--dial) * 0.014);
+}
+
+.device-popup-icon {
+  flex: 0 0 auto;
+  width: calc(var(--dial) * 0.05);
+  height: calc(var(--dial) * 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e6ecf5;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+  transition: color 0.2s ease, filter 0.2s ease;
+}
+
+.device-popup-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.device-popup-icon[data-on="true"] {
+  color: #ffd27a;
+  filter: drop-shadow(0 0 calc(var(--dial) * 0.014) rgba(255, 180, 84, 0.6))
+          drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.device-popup-title-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.device-popup-name {
+  font-size: calc(var(--dial) * 0.022);
+  color: var(--fg);
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.device-popup-sub {
+  font-size: calc(var(--dial) * 0.013);
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.device-popup-status-row {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--dial) * 0.004);
+  padding: calc(var(--dial) * 0.01) 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: calc(var(--dial) * 0.014);
+}
+
+.device-popup-status-line {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--dial) * 0.008);
+  font-size: calc(var(--dial) * 0.015);
+  color: var(--fg);
+}
+
+.device-popup-controls {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--dial) * 0.014);
+  margin-bottom: calc(var(--dial) * 0.014);
+}
+
+.device-popup-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--dial) * 0.012);
+}
+
+.device-popup-control-label {
+  font-size: calc(var(--dial) * 0.014);
+  color: var(--muted);
+}
+
+/* Toggle-knop in popup-stijl */
+.device-toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  cursor: pointer;
+  width: calc(var(--dial) * 0.06);
+  height: calc(var(--dial) * 0.03);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  position: relative;
+  padding: 0;
+  transition: background 0.2s ease;
+}
+
+.device-toggle.on {
+  background: var(--accent);
+  box-shadow: 0 0 calc(var(--dial) * 0.012) rgba(255, 180, 84, 0.5);
+}
+
+.device-toggle-knob {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
+  width: calc(var(--dial) * 0.024);
+  height: calc(var(--dial) * 0.024);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: left 0.2s ease;
+}
+
+.device-toggle.on .device-toggle-knob {
+  left: calc(100% - calc(var(--dial) * 0.024) - 4px);
+}
+
+.device-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Sliders (helderheid, kleurtemp) */
+.device-popup-slider {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--dial) * 0.006);
+}
+
+.device-popup-slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: calc(var(--dial) * 0.014);
+  color: var(--muted);
+}
+
+.device-popup-slider-head strong {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-popup-slider input[type="range"] {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  height: calc(var(--dial) * 0.008);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+  cursor: pointer;
+}
+
+.device-popup-slider input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: calc(var(--dial) * 0.022);
+  height: calc(var(--dial) * 0.022);
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #15213a;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+.device-popup-slider input[type="range"]::-moz-range-thumb {
+  width: calc(var(--dial) * 0.022);
+  height: calc(var(--dial) * 0.022);
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #15213a;
+  cursor: pointer;
+}
+
+.device-popup-slider input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Kleurtemp-track met blauw→oranje verloop */
+.device-popup-slider input.ct-slider {
+  background: linear-gradient(90deg, #b8d4ff 0%, #ffe6b8 50%, #ffb454 100%);
+}
+
+.device-popup-meter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: calc(var(--dial) * 0.014);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: calc(var(--dial) * 0.01);
+  padding: calc(var(--dial) * 0.008) calc(var(--dial) * 0.012);
+}
+
+.device-popup-meter strong {
+  color: var(--accent);
+  font-size: calc(var(--dial) * 0.018);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-popup-info {
+  font-size: calc(var(--dial) * 0.013);
+  color: var(--muted);
+}
+
+.device-popup-info-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: calc(var(--dial) * 0.012);
+  row-gap: calc(var(--dial) * 0.004);
+  margin: 0;
+}
+
+.device-popup-info-grid dt {
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.012);
+}
+
+.device-popup-info-grid dd {
+  margin: 0;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
 }
