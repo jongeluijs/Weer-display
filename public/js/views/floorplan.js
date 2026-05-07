@@ -12,6 +12,7 @@
 
 import { esc } from '../util/dom.js';
 import { getDeviceIcon, deviceTypeLabel } from '../util/device-icons.js';
+import { renderBarChart } from '../components/barChart.js';
 
 let state = {
   devices: [],         // geplaatste apparaten (van /api/floorplan)
@@ -19,6 +20,7 @@ let state = {
   editing: false,
   selectedDevice: null,
   renaming: null,      // id van device waarvan label op dit moment bewerkt wordt
+  shellyRange: 'today', // actieve tab in de energie-popup
 };
 
 // Status-cache per device-id voor live aan/uit-indicatie op de plattegrond.
@@ -56,7 +58,7 @@ export function renderFloorplanShell() {
     </div>
 
     <aside class="floor-edit-panel" id="floor-edit-panel" hidden>
-      <header class="floor-edit-panel-head">
+      <header class="floor-edit-panel-head" id="floor-edit-panel-head">
         <strong>Apparaten</strong>
         <span class="floor-edit-panel-actions">
           <button type="button" class="floor-icon-btn" id="floor-settings-btn" title="Instellingen" aria-label="Instellingen">
@@ -65,16 +67,10 @@ export function renderFloorplanShell() {
               <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
             </svg>
           </button>
-          <button type="button" class="floor-icon-btn" id="floor-refresh-btn" title="Opnieuw scannen" aria-label="Opnieuw scannen">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12a9 9 0 1 1-3-6.7"/>
-              <polyline points="21 4 21 9 16 9"/>
-            </svg>
-          </button>
         </span>
       </header>
       <div class="floor-edit-list" id="floor-edit-list">
-        <div class="state-msg">Klik op &#8635; om te scannen</div>
+        <div class="state-msg">Apparaten worden geladen…</div>
       </div>
     </aside>
 
@@ -187,29 +183,87 @@ function renderIcons() {
 }
 
 function iconHtml(d) {
-  const xPct = (d.x * 100).toFixed(2);
-  const yPct = (d.y * 100).toFixed(2);
-  const label = esc(deviceDisplayName(d));
-  const stateAttr = stateAttrFor(statusById.get(d.id));
+  // Plattegrond is visueel 180° gedraaid t.o.v. opgeslagen positie. Spiegel
+  // de coördinaten zodat de iconen "op dezelfde plek van de plattegrond"
+  // blijven hangen.
+  const xPct = ((1 - d.x) * 100).toFixed(2);
+  const yPct = ((1 - d.y) * 100).toFixed(2);
+  const ariaName = esc(deviceDisplayName(d));
+  const stateAttr = stateAttrFor(d, statusById.get(d.id));
+  const labelContent = labelContentFor(d, statusById.get(d.id));
   return `
     <div class="floor-icon" data-id="${esc(d.id)}" style="left:${xPct}%;top:${yPct}%">
       <span class="floor-icon-svg" data-type="${esc(d.type)}" data-state="${stateAttr}">${getDeviceIcon(d.type)}</span>
-      <span class="floor-icon-label">${label}</span>
-      <button type="button" class="floor-icon-remove" data-action="remove" aria-label="Verwijder ${label}">&times;</button>
+      <span class="floor-icon-label">${labelContent}</span>
+      <button type="button" class="floor-icon-remove" data-action="remove" aria-label="Verwijder ${ariaName}">&times;</button>
     </div>`;
 }
 
-function stateAttrFor(status) {
+function stateAttrFor(device, status) {
   if (!status) return 'unknown';
   if (status.online === false || status.reachable === false) return 'offline';
+  // Voor energiemeters wordt de kleur via inline style bepaald (zie
+  // powerColor); we negeren de aan/uit-glow.
+  if (isEnergyMeter(device.driver)) return 'meter';
   if (status.on === true) return 'on';
   if (status.on === false) return 'off';
   if (status.online === true) return 'online';
   return 'unknown';
 }
 
+// Kleur op basis van vermogen: 0W → licht groen, 2000W+ → donker rood.
+// Lineair geïnterpoleerd in HSL, met toenemende verzadiging en afnemende
+// helderheid naarmate het vermogen oploopt.
+function powerColor(power_w) {
+  if (!Number.isFinite(power_w) || power_w < 0) return null;
+  const t = Math.min(1, power_w / 2000);
+  const hue = 120 - 120 * t;        // 120° groen → 0° rood
+  const sat = 50 + 25 * t;          // 50% → 75%
+  const light = 68 - 30 * t;        // 68% (licht) → 38% (donker)
+  return `hsl(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%)`;
+}
+
+function applyPowerStyle(svgEl, power_w) {
+  if (!svgEl) return;
+  const color = powerColor(power_w);
+  if (!color) {
+    svgEl.style.color = '';
+    svgEl.style.filter = '';
+    return;
+  }
+  svgEl.style.color = color;
+  // Bij hoog vermogen subtiele glow toevoegen voor extra "alert"-gevoel.
+  if (power_w > 1500) {
+    const intensity = Math.min(1, (power_w - 1500) / 500);
+    svgEl.style.filter = `drop-shadow(0 0 calc(var(--dial) * ${(0.008 + 0.008 * intensity).toFixed(3)}) ${color}) drop-shadow(0 1px 2px rgba(0,0,0,0.5))`;
+  } else {
+    svgEl.style.filter = '';
+  }
+}
+
+// Hover-label: voor energiemeters het huidige vermogen, anders gewoon de naam.
+// In edit-modus altijd de naam, want dan hoef je geen live data te zien.
+function labelContentFor(device, status) {
+  if (!state.editing && isEnergyMeter(device.driver)) {
+    if (status && Number.isFinite(status.power_w)) {
+      return `${Math.round(status.power_w)} W`;
+    }
+    return '—';
+  }
+  return esc(deviceDisplayName(device));
+}
+
 function controllableDriver(driver) {
-  return driver === 'hue_light' || driver === 'shelly';
+  return driver === 'hue_light' || driver === 'shelly' || driver === 'shelly_gen2';
+}
+
+function isEnergyMeter(driver) {
+  // PM Mini Gen3 e.d. — energiemeter zonder relay; klik = grafiek tonen.
+  return driver === 'shelly_gen2' || driver === 'shelly';
+}
+
+function isToggleableLamp(driver) {
+  return driver === 'hue_light';
 }
 
 function pollPlacedStatuses() {
@@ -235,9 +289,23 @@ async function pollOne(id) {
 }
 
 function updateIconState(id) {
-  const icon = document.querySelector(`.floor-icon[data-id="${CSS.escape(id)}"] .floor-icon-svg`);
-  if (!icon) return;
-  icon.setAttribute('data-state', stateAttrFor(statusById.get(id)));
+  const wrap = document.querySelector(`.floor-icon[data-id="${CSS.escape(id)}"]`);
+  if (!wrap) return;
+  const svg = wrap.querySelector('.floor-icon-svg');
+  const label = wrap.querySelector('.floor-icon-label');
+  const dev = state.devices.find((d) => d.id === id);
+  if (!dev) return;
+  const status = statusById.get(id);
+  if (svg) {
+    svg.setAttribute('data-state', stateAttrFor(dev, status));
+    if (isEnergyMeter(dev.driver)) {
+      applyPowerStyle(svg, status?.power_w);
+    } else {
+      svg.style.color = '';
+      svg.style.filter = '';
+    }
+  }
+  if (label) label.innerHTML = labelContentFor(dev, status);
 }
 
 function priorityRank(d) {
@@ -277,7 +345,7 @@ function renderEditList() {
     html.push('<h4 class="floor-edit-section">Gevonden</h4>');
     html.push(candidates.map(discoveredItemHtml).join(''));
   } else if (placed.length === 0) {
-    html.push('<div class="state-msg">Geen apparaten — klik &#8635; om te scannen</div>');
+    html.push('<div class="state-msg">Geen apparaten gevonden in de scan.</div>');
   }
 
   list.innerHTML = html.join('');
@@ -348,7 +416,6 @@ function discoveredItemHtml(d) {
 export function bindFloorplanInteractions() {
   const canvas = document.getElementById('floor-canvas');
   const editBtn = document.getElementById('floor-edit-btn');
-  const refreshBtn = document.getElementById('floor-refresh-btn');
   const settingsBtn = document.getElementById('floor-settings-btn');
   const list = document.getElementById('floor-edit-list');
   const modal = document.getElementById('floor-modal');
@@ -359,12 +426,6 @@ export function bindFloorplanInteractions() {
       const next = !state.editing;
       setEditing(next);
       if (next && listeners.onRefreshDiscover) listeners.onRefreshDiscover();
-    });
-  }
-
-  if (refreshBtn) {
-    refreshBtn.addEventListener('click', () => {
-      if (listeners.onRefreshDiscover) listeners.onRefreshDiscover();
     });
   }
 
@@ -406,6 +467,82 @@ export function bindFloorplanInteractions() {
     list.addEventListener('click', onListClick);
     list.addEventListener('keydown', onListKeydown);
   }
+
+  bindEditPanelDrag();
+}
+
+// Maakt het edit-paneel sleepbaar zodat het niet in de weg blijft staan
+// wanneer je apparaten op de plattegrond verplaatst. De positie wordt
+// opgeslagen in localStorage zodat hij over sessies heen onthouden wordt.
+const PANEL_POS_KEY = 'floor-edit-panel-pos';
+
+function bindEditPanelDrag() {
+  const panel = document.getElementById('floor-edit-panel');
+  const head = document.getElementById('floor-edit-panel-head');
+  if (!panel || !head) return;
+
+  // Eventueel opgeslagen positie toepassen.
+  try {
+    const saved = JSON.parse(localStorage.getItem(PANEL_POS_KEY) || 'null');
+    if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+      panel.style.left = `${saved.left}px`;
+      panel.style.top = `${saved.top}px`;
+    }
+  } catch {}
+
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let panelStartLeft = 0;
+  let panelStartTop = 0;
+
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return; // niet starten op de instellings-knop
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const parent = panel.parentElement;
+    const pRect = parent.getBoundingClientRect();
+    const rect = panel.getBoundingClientRect();
+    panelStartLeft = rect.left - pRect.left;
+    panelStartTop = rect.top - pRect.top;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.left = `${panelStartLeft}px`;
+    panel.style.top = `${panelStartTop}px`;
+    head.setPointerCapture(e.pointerId);
+    panel.classList.add('dragging');
+    e.preventDefault();
+  });
+
+  head.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const parent = panel.parentElement;
+    const maxX = parent.clientWidth - panel.offsetWidth;
+    const maxY = parent.clientHeight - panel.offsetHeight;
+    const nx = Math.max(0, Math.min(maxX, panelStartLeft + dx));
+    const ny = Math.max(0, Math.min(maxY, panelStartTop + dy));
+    panel.style.left = `${nx}px`;
+    panel.style.top = `${ny}px`;
+  });
+
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    try { head.releasePointerCapture(e.pointerId); } catch {}
+    panel.classList.remove('dragging');
+    try {
+      const left = parseFloat(panel.style.left) || 0;
+      const top = parseFloat(panel.style.top) || 0;
+      localStorage.setItem(PANEL_POS_KEY, JSON.stringify({ left, top }));
+    } catch {}
+  }
+  head.addEventListener('pointerup', endDrag);
+  head.addEventListener('pointercancel', endDrag);
 }
 
 function onCanvasClick(e) {
@@ -448,7 +585,10 @@ function bindIconPress(canvas) {
       pressTimer = null;
       const id = pressedIcon?.dataset.id;
       const dev = state.devices.find((d) => d.id === id);
-      if (dev) openDeviceModal(dev);
+      if (!dev) return;
+      // Energiemeters openen direct op de "7d"-tab zodat long-press meer historie laat zien.
+      const opts = isEnergyMeter(dev.driver) ? { initialRange: '7d' } : {};
+      openDeviceModal(dev, opts);
     }, LONG_PRESS_MS);
   });
 
@@ -486,8 +626,8 @@ function bindIconPress(canvas) {
 }
 
 async function runDefaultAction(device) {
-  // Schakelbare apparaten: aan/uit togglen met optimistische UI-update.
-  if (controllableDriver(device.driver) && listeners.onAction) {
+  // Lampen togglen direct met optimistische UI-update.
+  if (isToggleableLamp(device.driver) && listeners.onAction) {
     const prev = statusById.get(device.id);
     if (prev && typeof prev.on === 'boolean') {
       statusById.set(device.id, { ...prev, on: !prev.on });
@@ -502,7 +642,12 @@ async function runDefaultAction(device) {
     }
     return;
   }
-  // Niet-schakelbare apparaten: popup openen als alternatief.
+  // Energiemeters openen popup met "vandaag"-grafiek.
+  if (isEnergyMeter(device.driver)) {
+    openDeviceModal(device, { initialRange: 'today' });
+    return;
+  }
+  // Overige apparaten: gewoon popup openen.
   openDeviceModal(device);
 }
 
@@ -587,8 +732,10 @@ async function onCanvasDrop(e) {
   e.preventDefault();
   const canvas = e.currentTarget;
   const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) / rect.width;
-  const y = (e.clientY - rect.top) / rect.height;
+  // Spiegel-inversie omdat de plattegrond visueel 180° gedraaid wordt; we
+  // slaan posities op in het oorspronkelijke (ongedraaide) frame.
+  const x = 1 - (e.clientX - rect.left) / rect.width;
+  const y = 1 - (e.clientY - rect.top) / rect.height;
 
   let payload = null;
   try {
@@ -650,8 +797,9 @@ function briToPercent(bri) {
   return Math.round((Math.max(1, Math.min(254, bri)) / 254) * 100);
 }
 
-async function openDeviceModal(device) {
+async function openDeviceModal(device, opts = {}) {
   state.selectedDevice = device;
+  state.shellyRange = opts.initialRange || 'today';
   const modal = document.getElementById('floor-modal');
   const body = document.getElementById('floor-modal-body');
   if (!modal || !body) return;
@@ -668,6 +816,10 @@ async function openDeviceModal(device) {
   statusById.set(device.id, status || null);
   updateIconState(device.id);
   renderStatus(device, status);
+  // Voor energiemeters de eerste grafiek meteen laden.
+  if (isEnergyMeter(device.driver)) {
+    void loadAndRenderShellyUsage(device.id, state.shellyRange);
+  }
 }
 
 function renderPopupShell(device) {
@@ -737,10 +889,18 @@ function renderStatus(device, status) {
     <span class="device-popup-status-line">${dot}<span>${labelBits.join(' · ')}</span></span>
     ${errorHtml}`;
 
-  // Pas icoon-state aan: groen-glow als 'aan' bekend en true
+  // Pas icoon-state aan: groen-glow als 'aan' bekend en true. Voor
+  // energiemeters de kleur op basis van vermogen overschrijven.
   if (iconSlot) {
-    if (status.on === true) iconSlot.dataset.on = 'true';
-    else iconSlot.removeAttribute('data-on');
+    if (isEnergyMeter(device.driver)) {
+      iconSlot.removeAttribute('data-on');
+      applyPowerStyle(iconSlot, status.power_w);
+    } else {
+      iconSlot.style.color = '';
+      iconSlot.style.filter = '';
+      if (status.on === true) iconSlot.dataset.on = 'true';
+      else iconSlot.removeAttribute('data-on');
+    }
   }
 
   // Driver-specifieke bediening renderen
@@ -759,8 +919,11 @@ function renderControls(device, status) {
   const driver = device.driver || 'generic';
   const sections = [];
 
-  // On/Off toggle (Hue light + Shelly)
-  if ((driver === 'hue_light' || driver === 'shelly') && typeof status.on === 'boolean') {
+  // On/Off toggle (Hue light + Shelly Gen1/Gen2 met relay)
+  if (
+    (driver === 'hue_light' || driver === 'shelly' || driver === 'shelly_gen2') &&
+    typeof status.on === 'boolean'
+  ) {
     sections.push(`
       <div class="device-popup-control-row">
         <span class="device-popup-control-label">Aan / uit</span>
@@ -806,13 +969,11 @@ function renderControls(device, status) {
       </div>`);
   }
 
-  // Vermogen (Shelly)
-  if (driver === 'shelly' && Number.isFinite(status.power_w)) {
-    sections.push(`
-      <div class="device-popup-meter">
-        <span>Vermogen</span>
-        <strong>${Math.round(status.power_w)} W</strong>
-      </div>`);
+  // Energie-meting (Shelly Gen1 + Gen2/Gen3 PM): live + grafiek-tabs.
+  // De grafiek wordt asynchroon geladen door loadAndRenderShellyUsage.
+  if (isEnergyMeter(driver)) {
+    sections.push(renderShellyLive(status));
+    sections.push(renderShellyChartShell(state.shellyRange));
   }
 
   // Hue Bridge: alleen extra info — geen bediening
@@ -847,6 +1008,19 @@ function renderControls(device, status) {
 function bindControlHandlers(device, status) {
   const slot = document.getElementById('device-popup-controls');
   if (!slot) return;
+
+  // Tabs voor de energiemeter-grafiek
+  slot.querySelectorAll('[data-shelly-tab]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const range = tab.getAttribute('data-shelly-tab');
+      if (!range || range === state.shellyRange) return;
+      state.shellyRange = range;
+      slot.querySelectorAll('[data-shelly-tab]').forEach((t) => {
+        t.classList.toggle('active', t.getAttribute('data-shelly-tab') === range);
+      });
+      void loadAndRenderShellyUsage(device.id, range);
+    });
+  });
 
   // Toggle-knop
   const toggle = slot.querySelector('[data-act="toggle"]');
@@ -908,4 +1082,116 @@ function showError(err) {
     'beforeend',
     `<div class="floor-status-error">${esc(err.message || String(err))}</div>`
   );
+}
+
+// -- Shelly energie-popup ------------------------------------------------------
+
+function renderShellyLive(status) {
+  const lines = [];
+  if (Number.isFinite(status.power_w)) {
+    lines.push(`
+      <div class="device-popup-meter primary">
+        <span>Huidig vermogen</span>
+        <strong>${Math.round(status.power_w)} W</strong>
+      </div>`);
+  }
+  if (Number.isFinite(status.total_kwh)) {
+    lines.push(`
+      <div class="device-popup-meter">
+        <span>Totaal sinds installatie</span>
+        <strong>${status.total_kwh.toFixed(2)} kWh</strong>
+      </div>`);
+  }
+  return lines.join('');
+}
+
+const SHELLY_RANGES = [
+  { key: 'today', label: 'Vandaag' },
+  { key: '7d', label: 'Week' },
+  { key: '30d', label: 'Maand' },
+];
+
+function renderShellyChartShell(activeRange) {
+  const tabs = SHELLY_RANGES.map(
+    ({ key, label }) => `
+    <button type="button"
+            class="device-popup-tab ${key === activeRange ? 'active' : ''}"
+            data-shelly-tab="${key}">${label}</button>`
+  ).join('');
+  return `
+    <div class="device-popup-chart-block">
+      <div class="device-popup-tabs" role="tablist">${tabs}</div>
+      <div class="device-popup-chart" id="device-popup-chart">
+        <div class="state-msg">Laden…</div>
+      </div>
+      <div class="device-popup-chart-summary" id="device-popup-chart-summary"></div>
+    </div>`;
+}
+
+async function loadAndRenderShellyUsage(deviceId, range) {
+  const chartSlot = document.getElementById('device-popup-chart');
+  const summarySlot = document.getElementById('device-popup-chart-summary');
+  if (!chartSlot) return;
+  chartSlot.innerHTML = '<div class="state-msg">Laden…</div>';
+  if (summarySlot) summarySlot.innerHTML = '';
+  try {
+    const res = await fetch(
+      `/api/floorplan/device/${encodeURIComponent(deviceId)}/usage?range=${encodeURIComponent(range)}`,
+      { cache: 'no-store' }
+    );
+    const json = await res.json();
+    if (!json?.ok) throw new Error(json?.error || 'fout bij ophalen');
+    // Race-conditie: gebruiker kan tab gewisseld hebben tijdens fetch.
+    if (state.selectedDevice?.id !== deviceId) return;
+    if (state.shellyRange !== range) return;
+    renderShellyChart(json, range);
+  } catch (err) {
+    chartSlot.innerHTML = `<div class="floor-status-error">${esc(err.message)}</div>`;
+  }
+}
+
+function renderShellyChart(json, range) {
+  const chartSlot = document.getElementById('device-popup-chart');
+  const summarySlot = document.getElementById('device-popup-chart-summary');
+  if (!chartSlot) return;
+
+  let bars = [];
+  let unit = 'kWh';
+  let summary = '';
+
+  if (range === 'today' && Array.isArray(json.hourly)) {
+    bars = json.hourly.map((h) => ({
+      label: String(h.hour).padStart(2, '0'),
+      value: Number.isFinite(h.kwh) ? h.kwh : 0,
+    }));
+    const totalToday = json.today?.kwh ?? bars.reduce((a, b) => a + (b.value || 0), 0);
+    summary = `Vandaag: <strong>${(totalToday || 0).toFixed(2)} kWh</strong>`;
+  } else if ((range === '7d' || range === '30d') && Array.isArray(json.daily)) {
+    bars = json.daily.map((d) => ({
+      label: shortDateLabel(d.date),
+      value: Number.isFinite(d.kwh) ? d.kwh : 0,
+    }));
+    const total = bars.reduce((a, b) => a + (b.value || 0), 0);
+    const avg = bars.length > 0 ? total / bars.length : 0;
+    summary = `Totaal ${range === '7d' ? '7 dagen' : '30 dagen'}: <strong>${total.toFixed(2)} kWh</strong> · gemiddeld ${avg.toFixed(2)} kWh/dag`;
+  }
+
+  if (bars.length === 0 || bars.every((b) => !b.value)) {
+    chartSlot.innerHTML = '<div class="state-msg">Nog geen historie. Een minuut geduld na het toevoegen…</div>';
+  } else {
+    chartSlot.innerHTML = renderBarChart(bars, {
+      width: 480,
+      height: 140,
+      unit,
+      color: '#ffb454',
+      showLabels: false,
+    });
+  }
+  if (summarySlot) summarySlot.innerHTML = summary;
+}
+
+function shortDateLabel(yyyymmdd) {
+  if (!yyyymmdd) return '';
+  const [, m, d] = yyyymmdd.split('-');
+  return `${Number(d)}/${Number(m)}`;
 }

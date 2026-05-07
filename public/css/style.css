@@ -2028,9 +2028,22 @@ button {
   width: 100%;
   aspect-ratio: 1 / 1;
   max-height: 100%;
-  background: url(/img/BeganeGrond.png) center/contain no-repeat;
   border-radius: calc(var(--dial) * 0.02);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
+}
+
+/* Plattegrond-afbeelding 180° gedraaid t.o.v. opslag. De iconen
+   compenseren via gemirrorde coördinaten in iconHtml(), zodat ze "op
+   dezelfde plek van de plattegrond" blijven hangen na rotatie. */
+.floor-canvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url(/img/BeganeGrond.png) center/contain no-repeat;
+  transform: rotate(180deg);
+  pointer-events: none;
+  border-radius: inherit;
 }
 
 .floor-canvas.editing {
@@ -2066,8 +2079,8 @@ button {
 }
 
 .floor-icon-svg {
-  width: calc(var(--dial) * 0.04);
-  height: calc(var(--dial) * 0.04);
+  width: calc(var(--dial) * 0.05);
+  height: calc(var(--dial) * 0.05);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2184,6 +2197,19 @@ button {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.floor-edit-panel.dragging {
+  cursor: grabbing;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
+}
+
+.floor-edit-panel.dragging .floor-edit-panel-head {
+  cursor: grabbing;
 }
 
 .floor-edit-panel-actions {
@@ -2192,8 +2218,7 @@ button {
   gap: calc(var(--dial) * 0.004);
 }
 
-.floor-icon-btn,
-.floor-refresh-btn {
+.floor-icon-btn {
   background: transparent;
   border: none;
   color: var(--muted);
@@ -2204,8 +2229,7 @@ button {
   justify-content: center;
 }
 
-.floor-icon-btn:hover,
-.floor-refresh-btn:hover {
+.floor-icon-btn:hover {
   color: var(--accent);
 }
 
@@ -2787,6 +2811,77 @@ button {
   color: var(--accent);
   font-size: calc(var(--dial) * 0.018);
   font-variant-numeric: tabular-nums;
+}
+
+.device-popup-meter.primary {
+  background: var(--accent-soft);
+  border-color: rgba(255, 180, 84, 0.35);
+}
+
+.device-popup-meter.primary strong {
+  font-size: calc(var(--dial) * 0.026);
+}
+
+.device-popup-chart-block {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--dial) * 0.008);
+}
+
+.device-popup-tabs {
+  display: flex;
+  gap: calc(var(--dial) * 0.004);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+  padding: 3px;
+  width: fit-content;
+}
+
+.device-popup-tab {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: calc(var(--dial) * 0.013);
+  padding: calc(var(--dial) * 0.005) calc(var(--dial) * 0.014);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.device-popup-tab:hover {
+  color: var(--fg);
+}
+
+.device-popup-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.device-popup-chart {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: calc(var(--dial) * 0.012);
+  padding: calc(var(--dial) * 0.008);
+  min-height: calc(var(--dial) * 0.16);
+}
+
+.device-popup-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.device-popup-chart-summary {
+  font-size: calc(var(--dial) * 0.013);
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.device-popup-chart-summary strong {
+  color: var(--fg);
 }
 
 .device-popup-info {
