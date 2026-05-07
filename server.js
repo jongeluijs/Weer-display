@@ -17,6 +17,7 @@ import { createDeviceControl } from './lib/device-control.js';
 import { createSettingsStore } from './lib/settings-store.js';
 import { createDiscoveryStore } from './lib/discovery-store.js';
 import { createDeepScan } from './lib/deep-scan.js';
+import { createShellyHistory } from './lib/shelly-history.js';
 import { createRouter } from './lib/router.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,6 +90,39 @@ async function main() {
   );
   await discoveryStore.load();
   const deepScan = createDeepScan({ store: discoveryStore });
+
+  // Per-device historie voor Shelly PM-apparaten op de plattegrond.
+  // Eén bestand per device in data/shelly/.
+  const shellyHistory = createShellyHistory(path.join(__dirname, 'data', 'shelly'));
+
+  async function sampleShellyDevices() {
+    const devices = floorplan.getAll().filter(
+      (d) => d.driver === 'shelly' || d.driver === 'shelly_gen2'
+    );
+    if (devices.length === 0) return;
+    for (const dev of devices) {
+      try {
+        const status = await deviceControl.getStatus(dev);
+        if (!status?.online) continue;
+        await shellyHistory.ingest(dev.id, {
+          power_w: status.power_w,
+          total_kwh: status.total_kwh,
+        });
+      } catch (err) {
+        console.warn(`[shelly-history] ${dev.id} sample fout: ${err.message}`);
+      }
+    }
+    try {
+      await shellyHistory.persistAll();
+    } catch (err) {
+      console.warn(`[shelly-history] persist fout: ${err.message}`);
+    }
+  }
+
+  const SHELLY_SAMPLE_MS = 60_000;
+  const shellyTimer = setInterval(sampleShellyDevices, SHELLY_SAMPLE_MS);
+  // Eerste sample direct, zodat de hover-popup niet leeg blijft tot de volgende minuut.
+  sampleShellyDevices();
 
   // Sample meterstanden + vermogen één keer per minuut naar history
   const ENERGY_SAMPLE_MS = 60_000;
@@ -166,6 +200,7 @@ async function main() {
     settings,
     deepScan,
     discoveryStore,
+    shellyHistory,
   });
 
   const server = http.createServer((req, res) => {
@@ -190,11 +225,13 @@ async function main() {
     console.log(`[weer-display] ${signal} ontvangen, afsluiten...`);
     clearInterval(timer);
     clearInterval(energyTimer);
+    clearInterval(shellyTimer);
     energy.stop();
     prices.stop();
     try {
       await history.persist();
       await energyHistory.persist();
+      await shellyHistory.persistAll();
     } catch (err) {
       console.warn('[weer-display] persist bij shutdown faalde:', err.message);
     }
