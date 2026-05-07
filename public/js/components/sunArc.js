@@ -1,7 +1,8 @@
 import { sunProgress } from '../util/sun.js';
+import { moonProgress } from '../util/moon.js';
 import { esc } from '../util/dom.js';
 import { renderRainRadarFragment, hasRainForecast } from './rainRadar.js';
-import { moonPhase, renderMoonPhase, moonPhaseName } from './moonPhase.js';
+import { moonPhase, moonPhaseName } from './moonPhase.js';
 
 // Afgeplatte halve-ellips zonboog met huidige zonpositie, zonkracht +
 // UV-index vast aan de zon, gouden-uur markering, maanfase 's nachts,
@@ -97,62 +98,63 @@ export function renderSunArc(liveweer, rainEntries = [], now = new Date()) {
             text-anchor="middle">${esc(grText)}</text>`
     : '';
 
-  // Zon- of maanicoon
-  const sunBody = isDay
-    ? `<circle r="11" fill="${sunColor}" opacity="0.22"/>
-       <circle r="6" fill="${sunColor}"/>
-       <g stroke="${sunColor}" stroke-width="1.3" stroke-linecap="round">
-         <line x1="0" y1="-11" x2="0" y2="-14"/>
-         <line x1="0" y1="11" x2="0" y2="14"/>
-         <line x1="-11" y1="0" x2="-14" y2="0"/>
-         <line x1="11" y1="0" x2="14" y2="0"/>
-         <line x1="-8" y1="-8" x2="-10" y2="-10"/>
-         <line x1="8" y1="8" x2="10" y2="10"/>
-         <line x1="-8" y1="8" x2="-10" y2="10"/>
-         <line x1="8" y1="-8" x2="10" y2="-10"/>
-       </g>`
-    : `<path d="M -4 -7 A 7 7 0 1 0 -4 7 A 5 5 0 0 1 -4 -7 Z" fill="${sunColor}"/>`;
+  // Zonicoon — alleen overdag op de boog
+  const sunIcon = isDay
+    ? `
+      <g transform="translate(${pos.x.toFixed(1)} ${pos.y.toFixed(1)})"
+         data-action="show-sun-chart" style="cursor: pointer;">
+        <circle r="18" fill="transparent"/>
+        <circle r="11" fill="${sunColor}" opacity="0.22"/>
+        <circle r="6" fill="${sunColor}"/>
+        <g stroke="${sunColor}" stroke-width="1.3" stroke-linecap="round">
+          <line x1="0" y1="-11" x2="0" y2="-14"/>
+          <line x1="0" y1="11" x2="0" y2="14"/>
+          <line x1="-11" y1="0" x2="-14" y2="0"/>
+          <line x1="11" y1="0" x2="14" y2="0"/>
+          <line x1="-8" y1="-8" x2="-10" y2="-10"/>
+          <line x1="8" y1="8" x2="10" y2="10"/>
+          <line x1="-8" y1="8" x2="-10" y2="10"/>
+          <line x1="8" y1="-8" x2="10" y2="-10"/>
+        </g>
+      </g>`
+    : '';
 
-  const sunIcon = `
-    <g transform="translate(${pos.x.toFixed(1)} ${pos.y.toFixed(1)})"
-       data-action="show-sun-chart" style="cursor: pointer;">
-      <circle r="18" fill="transparent"/>
-      ${sunBody}
-    </g>`;
-
-  // Maanfase 's nachts
+  // Maan op de boog wanneer hij boven de horizon staat (zowel overdag als 's nachts).
+  const moon = moonProgress(now);
   let moonSvg = '';
-  if (!isDay) {
+  if (moon.isUp) {
+    const mAngle = Math.PI * moon.t;
+    const mPos = {
+      x: cx - rx * Math.cos(mAngle),
+      y: cy - ry * Math.sin(mAngle),
+    };
     const phase = moonPhase(now);
     const phaseName = moonPhaseName(phase);
-    // Toon maan rechtsonder in de SVG
-    const moonX = end.x - 15;
-    const moonY = cy - 20;
-    // Render inline (kleine versie)
-    const moonSize = 18;
-    const mr = moonSize * 0.4;
-    const mcx = moonX;
-    const mcy = moonY;
+    const mr = 7;
     const terminator = Math.cos(phase * 2 * Math.PI) * mr;
 
+    let moonBody;
     if (phase >= 0.49 && phase <= 0.51) {
-      // Volle maan
-      moonSvg = `<circle cx="${mcx}" cy="${mcy}" r="${mr}" fill="#e8e4d4" opacity="0.85"/>`;
+      moonBody = `<circle r="${mr}" fill="#e8e4d4" opacity="0.9"/>`;
     } else if (phase > 0.01 && phase < 0.99) {
       const isWaxing = phase < 0.5;
       const sweepOuter = isWaxing ? 1 : 0;
       const rxT = Math.abs(terminator);
       const sweepInner = rxT < mr ? (isWaxing ? 0 : 1) : (isWaxing ? 1 : 0);
-      const top = { x: mcx, y: mcy - mr };
-      const bot = { x: mcx, y: mcy + mr };
-      const moonPath = `M ${top.x} ${top.y} A ${mr} ${mr} 0 0 ${sweepOuter} ${bot.x} ${bot.y} A ${rxT.toFixed(2)} ${mr} 0 0 ${sweepInner} ${top.x} ${top.y} Z`;
-      moonSvg = `
-        <circle cx="${mcx}" cy="${mcy}" r="${mr}" fill="rgba(255,255,255,0.06)"/>
-        <path d="${moonPath}" fill="#e8e4d4" opacity="0.75"/>`;
+      const moonPath = `M 0 ${-mr} A ${mr} ${mr} 0 0 ${sweepOuter} 0 ${mr} A ${rxT.toFixed(2)} ${mr} 0 0 ${sweepInner} 0 ${-mr} Z`;
+      moonBody = `
+        <circle r="${mr}" fill="rgba(255,255,255,0.08)"/>
+        <path d="${moonPath}" fill="#e8e4d4" opacity="0.85"/>`;
     } else {
-      moonSvg = `<circle cx="${mcx}" cy="${mcy}" r="${mr}" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.5"/>`;
+      moonBody = `<circle r="${mr}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>`;
     }
-    moonSvg += `<text x="${mcx}" y="${mcy + mr + 7}" fill="#8a93a6" font-size="5" text-anchor="middle" font-family="sans-serif">${esc(phaseName)}</text>`;
+
+    moonSvg = `
+      <g transform="translate(${mPos.x.toFixed(1)} ${mPos.y.toFixed(1)})">
+        <circle r="14" fill="transparent"/>
+        ${moonBody}
+        <text x="0" y="${mr + 7}" fill="#8a93a6" font-size="5" text-anchor="middle" font-family="sans-serif">${esc(phaseName)}</text>
+      </g>`;
   }
 
   // Regengrafiek binnen de half-ellips
