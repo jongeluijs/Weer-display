@@ -103,7 +103,7 @@ function pressureGauge(l, trendSublabel) {
 
 function hourCells(uurverwachting) {
   if (!Array.isArray(uurverwachting) || uurverwachting.length === 0) return '';
-  const cells = uurverwachting.slice(0, 12).map((u) => {
+  const cells = uurverwachting.slice(0, 18).map((u) => {
     const date = parseWeerliveHour(u.uur);
     const hour = date ? `${pad2(date.getHours())}u` : esc(u.uur || '');
     const icon = getIcon(u.image);
