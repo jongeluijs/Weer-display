@@ -1,7 +1,7 @@
 import { el, setHTML, esc } from './util/dom.js';
 import { formatClock, formatRelative, parseWeerliveHour, pad2 } from './util/format.js';
 import { startPolling, getHistory } from './api.js';
-import { renderToday } from './views/today.js';
+import { renderToday, renderHourStrip } from './views/today.js';
 import { renderForecast } from './views/forecast.js';
 import { renderHistory } from './views/history.js';
 import { renderLineChart } from './components/lineChart.js';
@@ -46,11 +46,18 @@ function showView(name) {
   const warnBtn = el('warning-btn');
   if (warnBtn) warnBtn.hidden = name !== 'today';
 
+  // Hour-strip overlay alleen op Vandaag-view zichtbaar.
+  const stripOverlay = el('hour-strip-overlay');
+  if (stripOverlay) stripOverlay.hidden = name !== 'today';
+
   updateTabIndicator();
   renderCurrentView();
 }
 
 async function renderCurrentView() {
+  const stripOverlay = el('hour-strip-overlay');
+  if (stripOverlay) stripOverlay.hidden = currentView !== 'today';
+
   if (currentView === 'today') {
     // Haal druktrend op
     let pressureTrendText = '';
@@ -67,6 +74,7 @@ async function renderCurrentView() {
       }
     }
     setHTML('view-today', renderToday(latestData, { pressureTrendText }));
+    setHTML('hour-strip-overlay', renderHourStrip(latestData?.uurverwachting));
   } else if (currentView === 'forecast') {
     setHTML('view-forecast', renderForecast(latestData));
   } else if (currentView === 'history') {
