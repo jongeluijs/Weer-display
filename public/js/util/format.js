@@ -11,15 +11,6 @@ export function formatClock(date = new Date()) {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
-export function formatClockSeconds(date = new Date()) {
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
-}
-
-export function formatDate(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  return `${DAYS_NL[d.getDay()]} ${d.getDate()} ${MONTHS_NL[d.getMonth()]}`;
-}
-
 export function formatDayShort(date) {
   const d = date instanceof Date ? date : new Date(date);
   return DAYS_NL[d.getDay()];
@@ -28,11 +19,6 @@ export function formatDayShort(date) {
 export function formatDateShort(date) {
   const d = date instanceof Date ? date : new Date(date);
   return `${d.getDate()} ${MONTHS_NL[d.getMonth()]}`;
-}
-
-export function formatHour(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  return `${pad2(d.getHours())}:00`;
 }
 
 export function formatTemp(value, digits = 0) {
