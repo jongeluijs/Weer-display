@@ -101,7 +101,9 @@ function pressureGauge(l, trendSublabel) {
   });
 }
 
-function hourCells(uurverwachting) {
+// Wordt los gerenderd in #hour-strip-overlay (buiten de ronde dial) zodat
+// de strip de volle schermbreedte mag gebruiken.
+export function renderHourStrip(uurverwachting) {
   if (!Array.isArray(uurverwachting) || uurverwachting.length === 0) return '';
   const cells = uurverwachting.slice(0, 18).map((u) => {
     const date = parseWeerliveHour(u.uur);
@@ -163,8 +165,6 @@ export function renderToday(data, opts = {}) {
 
   const verwText = l.verw ? `<div class="verw-text">${esc(l.verw)}</div>` : '';
 
-  const hourStrip = hourCells(data.uurverwachting);
-
   const rainEntries = Array.isArray(data?.rain?.entries) ? data.rain.entries : [];
   const sunArc = renderSunArc(l, rainEntries);
 
@@ -175,7 +175,6 @@ export function renderToday(data, opts = {}) {
   <div class="today-main">
     ${hero}
     ${gauges}
-    ${hourStrip}
     ${verwText}
     <div class="sun-wrap">
       ${sunArc}

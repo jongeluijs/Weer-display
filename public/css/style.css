@@ -776,16 +776,35 @@ button {
 
 /* -- Hour strip ----------------------------------------------------------- */
 
+/* Hour-strip wordt gerenderd in #hour-strip-overlay (zie index.html), een
+   sibling van .dial zodat hij niet door het ronde-dial-masker wordt afgekapt
+   en de volle schermbreedte kan gebruiken. */
+.hour-strip-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* Verticaal uitgelijnd net onder het midden van de dial, ongeveer waar
+     de strip vroeger in .today-main stond. */
+  top: calc(50% + var(--dial) * 0.08);
+  transform: translateY(-50%);
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  padding: 0 calc(var(--dial) * 0.01);
+  pointer-events: none;
+}
+
+.hour-strip-overlay[hidden] {
+  display: none;
+}
+
 .hour-strip {
   display: flex;
   justify-content: center;
-  gap: calc(var(--dial) * 0.003);
-  overflow-x: auto;
-  width: 100%;
-  padding: calc(var(--dial) * 0.002) 0;
-  margin-top: 0;
+  gap: calc(var(--dial) * 0.005);
+  flex-wrap: nowrap;
   scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+  pointer-events: auto;
 }
 
 .hour-strip::-webkit-scrollbar {
@@ -797,8 +816,8 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: calc(var(--dial) * 0.038);
-  padding: calc(var(--dial) * 0.004) calc(var(--dial) * 0.002);
+  min-width: calc(var(--dial) * 0.048);
+  padding: calc(var(--dial) * 0.004) calc(var(--dial) * 0.003);
   border-radius: calc(var(--dial) * 0.008);
   gap: 1px;
 }
