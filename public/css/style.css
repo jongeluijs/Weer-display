@@ -779,7 +779,7 @@ button {
 .hour-strip {
   display: flex;
   justify-content: center;
-  gap: calc(var(--dial) * 0.005);
+  gap: calc(var(--dial) * 0.003);
   overflow-x: auto;
   width: 100%;
   padding: calc(var(--dial) * 0.002) 0;
@@ -797,8 +797,8 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: calc(var(--dial) * 0.048);
-  padding: calc(var(--dial) * 0.004) calc(var(--dial) * 0.003);
+  min-width: calc(var(--dial) * 0.038);
+  padding: calc(var(--dial) * 0.004) calc(var(--dial) * 0.002);
   border-radius: calc(var(--dial) * 0.008);
   gap: 1px;
 }
