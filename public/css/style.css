@@ -622,6 +622,7 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
+  padding-top: calc(var(--dial) * 0.035);
 }
 
 .today-upper .gauge-grid {
