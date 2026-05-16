@@ -783,10 +783,8 @@ button {
   position: fixed;
   left: 0;
   right: 0;
-  /* Verticaal uitgelijnd net onder het midden van de dial, ongeveer waar
-     de strip vroeger in .today-main stond. */
-  top: calc(50% + var(--dial) * 0.08);
-  transform: translateY(-50%);
+  /* Bovenkant van de strip valt precies op de horizontale middenlijn. */
+  top: 50%;
   z-index: 5;
   display: flex;
   justify-content: center;
