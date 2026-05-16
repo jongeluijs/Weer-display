@@ -173,12 +173,16 @@ export function renderToday(data, opts = {}) {
 
   return `
   <div class="today-main">
-    ${hero}
-    ${gauges}
-    ${verwText}
-    <div class="sun-wrap">
-      ${sunArc}
-      ${dayLength}
+    <div class="today-upper">
+      ${hero}
+      ${gauges}
+    </div>
+    <div class="today-lower">
+      ${verwText}
+      <div class="sun-wrap">
+        ${sunArc}
+        ${dayLength}
+      </div>
     </div>
   </div>`;
 }
