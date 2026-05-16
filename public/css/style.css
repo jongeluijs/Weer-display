@@ -608,9 +608,33 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-evenly;
   width: 100%;
   height: 100%;
+}
+
+/* Bovenste helft (hero + gauges) en onderste helft (verw + zonboog) zijn
+   even hoog, met de scheidslijn op ~50% — net waar de hour-strip overlay
+   begint. De gauges krijgen `margin: auto 0` zodat ze verticaal centreren
+   in de ruimte tussen hero en strip. */
+.today-upper {
+  flex: 1 1 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.today-upper .gauge-grid {
+  margin: auto 0;
+}
+
+.today-lower {
+  flex: 1 1 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
 }
 
 /* -- Hero section --------------------------------------------------------- */
